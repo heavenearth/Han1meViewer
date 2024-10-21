@@ -12,11 +12,7 @@
         android:name="com.yenaly.han1meviewer.ui.fragment.home.WatchHistoryFragment" />
     <fragment
         android:id="@id/nv_fav_video"
-        android:name="com.yenaly.han1meviewer.ui.fragment.home.MyFavVideoFragment">
-        <action
-            android:id="@+id/action_nv_fav_video_to_home_page"
-            app:destination="@id/nv_home_page" />
-    </fragment>
+        android:name="com.yenaly.han1meviewer.ui.fragment.home.MyFavVideoFragment" />
     <fragment
         android:id="@id/nv_playlist"
         android:name="com.yenaly.han1meviewer.ui.fragment.home.MyPlaylistFragment" />

@@ -1,6 +1,9 @@
 package com.yenaly.han1meviewer.ui.fragment.home
 
 import android.os.Bundle
+import android.view.LayoutInflater
+import android.view.ViewGroup
+import androidx.fragment.app.activityViewModels
 import androidx.lifecycle.flowWithLifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
@@ -11,7 +14,6 @@ import com.yenaly.han1meviewer.ui.activity.MainActivity
 import com.yenaly.han1meviewer.ui.adapter.WatchHistoryRvAdapter
 import com.yenaly.han1meviewer.ui.fragment.IToolbarFragment
 import com.yenaly.han1meviewer.ui.viewmodel.MainViewModel
-import com.yenaly.han1meviewer.util.notNull
 import com.yenaly.han1meviewer.util.setStateViewLayout
 import com.yenaly.han1meviewer.util.showAlertDialog
 import com.yenaly.yenaly_libs.base.YenalyFragment
@@ -23,10 +25,19 @@ import kotlinx.coroutines.launch
  * @author Yenaly Liew
  * @time 2022/07/01 001 21:23
  */
-class WatchHistoryFragment : YenalyFragment<FragmentPageListBinding, MainViewModel>(),
+class WatchHistoryFragment : YenalyFragment<FragmentPageListBinding>(),
     IToolbarFragment<MainActivity>, StateLayoutMixin {
 
+    val viewModel by activityViewModels<MainViewModel>()
+
     private val historyAdapter by unsafeLazy { WatchHistoryRvAdapter() }
+
+    override fun getViewBinding(
+        inflater: LayoutInflater,
+        container: ViewGroup?
+    ): FragmentPageListBinding {
+        return FragmentPageListBinding.inflate(inflater, container, false)
+    }
 
     override fun initData(savedInstanceState: Bundle?) {
         (activity as MainActivity).setupToolbar()
@@ -38,10 +49,10 @@ class WatchHistoryFragment : YenalyFragment<FragmentPageListBinding, MainViewMod
         binding.srlPageList.finishRefreshWithNoMoreData()
         historyAdapter.setStateViewLayout(R.layout.layout_empty_view)
         historyAdapter.setOnItemLongClickListener { _, _, position ->
-            val data = historyAdapter.getItem(position).notNull()
+            val data = historyAdapter.getItem(position) ?: return@setOnItemLongClickListener true
             requireContext().showAlertDialog {
-                setTitle("刪除歷史記錄")
-                setMessage(getString(R.string.sure_to_delete_s_video, data.title))
+                setTitle(R.string.delete_history)
+                setMessage(getString(R.string.sure_to_delete_s, data.title))
                 setPositiveButton(R.string.confirm) { _, _ ->
                     viewModel.deleteWatchHistory(data)
                 }
@@ -71,24 +82,23 @@ class WatchHistoryFragment : YenalyFragment<FragmentPageListBinding, MainViewMod
         ) { item ->
             when (item.itemId) {
                 R.id.tb_delete -> {
-                    // todo: strings.xml
                     requireContext().showAlertDialog {
-                        setTitle("看這裏！")
-                        setMessage("是否將影片觀看歷史記錄全部刪除🤔")
-                        setPositiveButton("是的！") { _, _ ->
+                        setTitle(R.string.sure_to_delete)
+                        setMessage(R.string.sure_to_delete_all_histories)
+                        setPositiveButton(R.string.sure) { _, _ ->
                             viewModel.deleteAllWatchHistories()
                             historyAdapter.submitList(null)
                         }
-                        setNegativeButton("算了！", null)
+                        setNegativeButton(R.string.no, null)
                     }
                     return@addMenu true
                 }
 
                 R.id.tb_help -> {
                     requireContext().showAlertDialog {
-                        setTitle("使用注意！")
-                        setMessage("長按可以刪除歷史記錄哦，右上角的刪除按鈕是負責刪除全部歷史記錄的！")
-                        setPositiveButton("OK", null)
+                        setTitle(R.string.attention)
+                        setMessage(R.string.long_press_to_delete_all_histories)
+                        setPositiveButton(R.string.ok, null)
                     }
                     return@addMenu true
                 }

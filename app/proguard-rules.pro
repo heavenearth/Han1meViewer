@@ -19,3 +19,13 @@
 # If you keep the line number information, uncomment this to
 # hide the original source file name.
 #-renamesourcefileattribute SourceFile
+
+-keepattributes SourceFile, LineNumberTable
+
+-keepnames class * extends android.app.Activity
+-keepnames class * extends androidx.fragment.app.Fragment
+
+-keep class * extends cn.jzvd.** { *; }
+
+-keep class com.google.android.gms.** { *; }
+-keep interface com.google.android.gms.** { *; }

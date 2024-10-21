@@ -1,7 +1,8 @@
 package com.yenaly.han1meviewer
 
-import com.yenaly.yenaly_libs.utils.appScreenWidth
-import com.yenaly.yenaly_libs.utils.applicationContext
+import kotlinx.datetime.LocalDate
+import kotlinx.datetime.LocalDateTime
+import kotlinx.datetime.format.char
 
 /**
  * 我觉得空字符串写出来太逆天了，所以搞了个常量
@@ -10,24 +11,21 @@ const val EMPTY_STRING = ""
 
 // 标准时间格式
 
-const val DATE_FORMAT = "yyyy-MM-dd"
+/* yyyy-MM-dd */
+@JvmField
+val LOCAL_DATE_FORMAT = LocalDate.Formats.ISO
 
-const val DATE_TIME_FORMAT = "yyyy-MM-dd HH:mm"
+/* yyyy-MM-dd HH:mm */
+@JvmField
+val LOCAL_DATE_TIME_FORMAT = LocalDateTime.Format {
+    date(LocalDate.Formats.ISO); char(' ')
+    hour(); char(':'); minute()
+}
 
 // 网络基本设置
 
 const val USER_AGENT =
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/103.0.0.0 Safari/537.36"
-
-// 動態設置影片卡片長寬
-
-val VIDEO_IN_ONE_LINE
-    get() =
-        (appScreenWidth / applicationContext.resources.getDimension(R.dimen.video_cover_width)).toInt()
-
-val SIMPLIFIED_VIDEO_IN_ONE_LINE
-    get() =
-        (appScreenWidth / applicationContext.resources.getDimension(R.dimen.video_cover_simplified_width)).toInt()
 
 // 設置發佈日期年份，在搜索的tag裏
 
@@ -39,7 +37,7 @@ const val SEARCH_YEAR_RANGE_START = 1990
 /**
  * 發佈日期年份結束於
  */
-const val SEARCH_YEAR_RANGE_END = 2022
+const val SEARCH_YEAR_RANGE_END = BuildConfig.SEARCH_YEAR_RANGE_END
 
 // intent傳值用名稱
 
@@ -96,13 +94,15 @@ val HANIME_LOGIN_URL = HANIME_BASE_URL + "login"
 
 // github url
 
-const val HA1_GITHUB_URL = "https://github.com/YenalyLiew/Han1meViewer/"
+const val HA1_GITHUB_URL = "https://github.com/YenalyLiew/Han1meViewer"
 
-const val HA1_GITHUB_ISSUE_URL = HA1_GITHUB_URL + "issues"
+const val HA1_GITHUB_ISSUE_URL = "$HA1_GITHUB_URL/issues"
 
-const val HA1_GITHUB_FORUM_URL = HA1_GITHUB_URL + "discussions"
+const val HA1_GITHUB_FORUM_URL = "$HA1_GITHUB_URL/discussions"
 
-const val HA1_GITHUB_RELEASES_URL = HA1_GITHUB_URL + "releases"
+const val HA1_GITHUB_RELEASES_URL = "$HA1_GITHUB_URL/releases"
+
+const val HA1_GITHUB_API_URL = "https://api.github.com/repos/YenalyLiew/Han1meViewer/"
 
 // for Shared Preference
 
@@ -113,3 +113,9 @@ const val ALREADY_LOGIN = "already_login"
 // Notification
 
 const val DOWNLOAD_NOTIFICATION_CHANNEL = "download_channel"
+
+const val UPDATE_NOTIFICATION_CHANNEL = "update_channel"
+
+// File
+
+const val FILE_PROVIDER_AUTHORITY = "${BuildConfig.APPLICATION_ID}.fileProvider"

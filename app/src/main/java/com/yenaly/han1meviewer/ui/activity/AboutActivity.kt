@@ -5,6 +5,8 @@ import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
 import android.widget.ImageView
 import android.widget.TextView
+import androidx.core.graphics.ColorUtils
+import androidx.core.view.WindowCompat
 import coil.load
 import coil.transform.CircleCropTransformation
 import com.drakeet.about.AbsAboutActivity
@@ -12,8 +14,10 @@ import com.drakeet.about.Card
 import com.drakeet.about.Category
 import com.drakeet.about.Contributor
 import com.google.android.material.appbar.AppBarLayout
+import com.yenaly.circularrevealswitch.SwitchAnimation
+import com.yenaly.circularrevealswitch.ext.setDayNightModeSwitcher
+import com.yenaly.han1meviewer.BuildConfig
 import com.yenaly.han1meviewer.R
-import com.yenaly.yenaly_libs.utils.appLocalVersionName
 import com.yenaly.yenaly_libs.utils.showSnackBar
 
 /**
@@ -24,7 +28,7 @@ import com.yenaly.yenaly_libs.utils.showSnackBar
 class AboutActivity : AbsAboutActivity() {
 
     private val eggArray = arrayOf(
-        "爲什麽點擊這裏，以爲這裏有彩蛋嗎？",
+        "為什麼點擊這裡，以為這裡有彩蛋嗎？",
         "別點了！！",
         "再點擊 4 次進入崩壞模式",
         "再點擊 3 次進入崩壞模式",
@@ -50,8 +54,24 @@ class AboutActivity : AbsAboutActivity() {
             cornerRadius = 0F
         }
 
+        val controller = WindowCompat.getInsetsController(window, window.decorView)
+        if (ColorUtils.calculateLuminance(randomHeaderColor) > 0.5) {
+            slogan.setTextColor(Color.BLACK)
+            version.setTextColor(Color.BLACK)
+            controller.isAppearanceLightStatusBars = true
+        } else {
+            slogan.setTextColor(Color.WHITE)
+            version.setTextColor(Color.WHITE)
+            controller.isAppearanceLightStatusBars = false
+        }
+
         findViewById<AppBarLayout>(com.drakeet.about.R.id.header_layout).apply {
             setBackgroundColor(randomHeaderColor)
+            setDayNightModeSwitcher(
+                duration = 1000L,
+                animToDayMode = SwitchAnimation.entries.random(),
+                animToNightMode = SwitchAnimation.entries.random()
+            )
         }
         setHeaderContentScrim(gradientDrawable)
 
@@ -62,7 +82,7 @@ class AboutActivity : AbsAboutActivity() {
             showSnackBar(eggArray[clickIconTimes++ % eggArray.size])
         }
         slogan.setText(R.string.app_slogan)
-        version.text = "v$appLocalVersionName"
+        version.text = "v${BuildConfig.VERSION_NAME}"
     }
 
     override fun onItemsCreated(items: MutableList<Any>) {
@@ -72,7 +92,7 @@ class AboutActivity : AbsAboutActivity() {
                 Card(
                     """
                 Hanime1的非官方客戶端，提供了等同Hanime1網站的大部分功能。
-                并且提供了一些獨特的功能。
+                並且提供了一些獨特的功能。
                 請注意：本軟體僅供學習使用，軟體作者與網站擁有者無關。
             """.trimIndent()
                 )
@@ -93,6 +113,14 @@ class AboutActivity : AbsAboutActivity() {
                     "rurires",
                     "Icon creator",
                     "https://github.com/rurires"
+                )
+            )
+            add(
+                Contributor(
+                    R.drawable.neko_ouo,
+                    "NeKoOuO",
+                    "Contributor",
+                    "https://github.com/NeKoOuO"
                 )
             )
         }

@@ -12,12 +12,12 @@ import android.webkit.CookieManager
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import androidx.activity.SystemBarStyle
+import androidx.activity.enableEdgeToEdge
 import androidx.annotation.LayoutRes
 import androidx.appcompat.app.AlertDialog
-import androidx.core.os.BuildCompat.PrereleaseSdkCheck
 import androidx.databinding.DataBindingUtil
 import androidx.lifecycle.lifecycleScope
-import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.textfield.TextInputEditText
 import com.itxca.spannablex.spannable
 import com.yenaly.han1meviewer.HANIME_ALTER_BASE_URL
@@ -29,8 +29,9 @@ import com.yenaly.han1meviewer.databinding.ActivityLoginBinding
 import com.yenaly.han1meviewer.logic.NetworkRepo
 import com.yenaly.han1meviewer.logic.state.WebsiteState
 import com.yenaly.han1meviewer.login
+import com.yenaly.han1meviewer.util.createAlertDialog
+import com.yenaly.han1meviewer.util.showWithBlurEffect
 import com.yenaly.yenaly_libs.base.frame.FrameActivity
-import com.yenaly.yenaly_libs.utils.SystemStatusUtil
 import com.yenaly.yenaly_libs.utils.showShortToast
 import com.yenaly.yenaly_libs.utils.unsafeLazy
 import kotlinx.coroutines.launch
@@ -39,13 +40,15 @@ class LoginActivity : FrameActivity() {
 
     private lateinit var binding: ActivityLoginBinding
 
-    private val dialog by unsafeLazy { LoginDialog(R.layout.dialog_login) }
+    private val dialog = unsafeLazy { LoginDialog(R.layout.dialog_login) }
 
     override fun setUiStyle() {
-        SystemStatusUtil.fullScreen(window, true)
+        enableEdgeToEdge(
+            statusBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
+            navigationBarStyle = SystemBarStyle.dark(Color.TRANSPARENT)
+        )
     }
 
-    @PrereleaseSdkCheck
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = DataBindingUtil.setContentView(this, R.layout.activity_login)
@@ -76,6 +79,16 @@ class LoginActivity : FrameActivity() {
         binding.srlLogin.autoRefresh()
     }
 
+    override fun onDestroy() {
+        super.onDestroy()
+        if (dialog.isInitialized()) {
+            dialog.value.dismiss()
+        }
+        binding.wvLogin.removeAllViews()
+        binding.wvLogin.destroy()
+        binding.unbind()
+    }
+
     override fun onOptionsItemSelected(item: MenuItem): Boolean {
         when (item.itemId) {
             android.R.id.home -> {
@@ -99,6 +112,7 @@ class LoginActivity : FrameActivity() {
         binding.wvLogin.apply {
             // #issue-17: 谷歌登录需要开启JavaScript，但是谷歌拒絕這種登錄方式，遂放棄
             settings.javaScriptEnabled = true
+            settings.domStorageEnabled = true
             settings.userAgentString = USER_AGENT
 
             webViewClient = object : WebViewClient() {
@@ -124,15 +138,18 @@ class LoginActivity : FrameActivity() {
                     return super.shouldOverrideUrlLoading(view, request)
                 }
 
-                @Suppress("OVERRIDE_DEPRECATION")
                 override fun onReceivedError(
                     view: WebView?,
                     errorCode: Int,
                     description: String?,
                     failingUrl: String?,
                 ) {
-                    binding.srlLogin.finishRefresh()
-                    dialog.show()
+                    // #issue-146
+                    // #issue-160: 修复字段销毁后调用引发的错误
+                    if (!isDestroyed && !isFinishing) {
+                        binding.srlLogin.finishRefresh()
+                        dialog.value.show()
+                    }
                 }
             }
         }
@@ -151,13 +168,13 @@ class LoginActivity : FrameActivity() {
             val view = View.inflate(this@LoginActivity, layoutRes, null)
             etUsername = view.findViewById(R.id.et_username)
             etPassword = view.findViewById(R.id.et_password)
-            dialog = MaterialAlertDialogBuilder(this@LoginActivity)
-                .setView(view)
-                .setCancelable(false)
-                .setTitle(R.string.try_login_here)
-                .setPositiveButton(R.string.login, null)
-                .setNegativeButton(R.string.cancel, null)
-                .create()
+            dialog = createAlertDialog {
+                setView(view)
+                setCancelable(false)
+                setTitle(R.string.try_login_here)
+                setPositiveButton(R.string.login, null)
+                setNegativeButton(R.string.cancel, null)
+            }
             dialog.setOnShowListener {
                 dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
                     handleLogin()
@@ -188,7 +205,7 @@ class LoginActivity : FrameActivity() {
                             login(state.info)
                             setResult(RESULT_OK)
                             dialog.dismiss()
-                            showShortToast(R.string.login_successful)
+                            showShortToast(R.string.login_success)
                             finish()
                         }
                     }
@@ -197,7 +214,11 @@ class LoginActivity : FrameActivity() {
         }
 
         fun show() {
-            dialog.show()
+            dialog.showWithBlurEffect()
+        }
+
+        fun dismiss() {
+            dialog.dismiss()
         }
     }
 }

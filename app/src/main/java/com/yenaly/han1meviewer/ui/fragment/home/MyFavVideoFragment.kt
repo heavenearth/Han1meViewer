@@ -3,12 +3,15 @@ package com.yenaly.han1meviewer.ui.fragment.home
 import android.annotation.SuppressLint
 import android.content.res.Configuration
 import android.os.Bundle
-import android.util.Log
+import android.view.LayoutInflater
+import android.view.ViewGroup
+import androidx.fragment.app.activityViewModels
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
-import androidx.lifecycle.whenStarted
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.recyclerview.widget.GridLayoutManager
 import com.yenaly.han1meviewer.R
-import com.yenaly.han1meviewer.SIMPLIFIED_VIDEO_IN_ONE_LINE
+import com.yenaly.han1meviewer.VideoCoverSize
 import com.yenaly.han1meviewer.databinding.FragmentPageListBinding
 import com.yenaly.han1meviewer.logic.state.PageLoadingState
 import com.yenaly.han1meviewer.logic.state.WebsiteState
@@ -18,11 +21,11 @@ import com.yenaly.han1meviewer.ui.adapter.HanimeMyListVideoAdapter
 import com.yenaly.han1meviewer.ui.fragment.IToolbarFragment
 import com.yenaly.han1meviewer.ui.fragment.LoginNeededFragmentMixin
 import com.yenaly.han1meviewer.ui.viewmodel.MyListViewModel
-import com.yenaly.han1meviewer.util.notNull
 import com.yenaly.han1meviewer.util.showAlertDialog
 import com.yenaly.yenaly_libs.base.YenalyFragment
 import com.yenaly.yenaly_libs.utils.showShortToast
 import com.yenaly.yenaly_libs.utils.unsafeLazy
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 
 /**
@@ -30,16 +33,25 @@ import kotlinx.coroutines.launch
  * @author Yenaly Liew
  * @time 2022/07/04 004 22:43
  */
-class MyFavVideoFragment : YenalyFragment<FragmentPageListBinding, MyListViewModel>(),
+class MyFavVideoFragment : YenalyFragment<FragmentPageListBinding>(),
     IToolbarFragment<MainActivity>, LoginNeededFragmentMixin, StateLayoutMixin {
+
+    val viewModel by activityViewModels<MyListViewModel>()
 
     private var page: Int
         set(value) {
-            viewModel.favVideoPage = value
+            viewModel.fav.favVideoPage = value
         }
-        get() = viewModel.favVideoPage
+        get() = viewModel.fav.favVideoPage
 
     private val adapter by unsafeLazy { HanimeMyListVideoAdapter() }
+
+    override fun getViewBinding(
+        inflater: LayoutInflater,
+        container: ViewGroup?
+    ): FragmentPageListBinding {
+        return FragmentPageListBinding.inflate(inflater, container, false)
+    }
 
     override fun initData(savedInstanceState: Bundle?) {
         checkLogin()
@@ -47,15 +59,13 @@ class MyFavVideoFragment : YenalyFragment<FragmentPageListBinding, MyListViewMod
 
         binding.state.init()
 
-        getNewMyFavVideo()
-
         adapter.setOnItemLongClickListener { _, _, position ->
-            val item = adapter.getItem(position).notNull()
+            val item = adapter.getItem(position) ?: return@setOnItemLongClickListener true
             requireContext().showAlertDialog {
-                setTitle("刪除喜歡")
-                setMessage(getString(R.string.sure_to_delete_s_video, item.title))
+                setTitle(R.string.delete_fav)
+                setMessage(getString(R.string.sure_to_delete_s, item.title))
                 setPositiveButton(R.string.confirm) { _, _ ->
-                    viewModel.deleteMyFavVideo(item.videoCode, position)
+                    viewModel.fav.deleteMyFavVideo(item.videoCode, position)
                 }
                 setNegativeButton(R.string.cancel, null)
             }
@@ -63,7 +73,7 @@ class MyFavVideoFragment : YenalyFragment<FragmentPageListBinding, MyListViewMod
         }
 
         binding.rvPageList.apply {
-            layoutManager = GridLayoutManager(context, SIMPLIFIED_VIDEO_IN_ONE_LINE)
+            layoutManager = GridLayoutManager(context, VideoCoverSize.Simplified.videoInOneLine)
             adapter = this@MyFavVideoFragment.adapter
         }
 
@@ -81,8 +91,8 @@ class MyFavVideoFragment : YenalyFragment<FragmentPageListBinding, MyListViewMod
     @SuppressLint("SetTextI18n")
     override fun bindDataObservers() {
         viewLifecycleOwner.lifecycleScope.launch {
-            whenStarted {
-                viewModel.favVideoFlow.collect { state ->
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                viewModel.fav.favVideoStateFlow.collect { state ->
                     when (state) {
                         is PageLoadingState.Error -> {
                             binding.srlPageList.finishRefresh()
@@ -93,21 +103,18 @@ class MyFavVideoFragment : YenalyFragment<FragmentPageListBinding, MyListViewMod
 
                         is PageLoadingState.Loading -> {
                             adapter.stateView = null
-                            if (adapter.items.isEmpty()) binding.srlPageList.autoRefreshAnimationOnly()
+                            if (viewModel.fav.favVideoFlow.value.isEmpty()) binding.srlPageList.autoRefresh()
                         }
 
                         is PageLoadingState.NoMoreData -> {
                             binding.srlPageList.finishLoadMoreWithNoMoreData()
-                            Log.d("empty", adapter.items.isEmpty().toString())
-                            if (adapter.items.isEmpty()) binding.state.showEmpty()
+                            if (viewModel.fav.favVideoFlow.value.isEmpty()) binding.state.showEmpty()
                         }
 
                         is PageLoadingState.Success -> {
                             page++
                             binding.srlPageList.finishRefresh()
                             binding.srlPageList.finishLoadMore(true)
-                            viewModel.csrfToken = state.info.csrfToken
-                            adapter.addAll(state.info.hanimeInfo)
                             binding.state.showContent()
                         }
                     }
@@ -116,10 +123,18 @@ class MyFavVideoFragment : YenalyFragment<FragmentPageListBinding, MyListViewMod
         }
 
         viewLifecycleOwner.lifecycleScope.launch {
-            viewModel.deleteMyFavVideoFlow.collect { state ->
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                viewModel.fav.favVideoFlow.collectLatest {
+                    adapter.submitList(it)
+                }
+            }
+        }
+
+        viewLifecycleOwner.lifecycleScope.launch {
+            viewModel.fav.deleteMyFavVideoFlow.collect { state ->
                 when (state) {
                     is WebsiteState.Error -> {
-                        showShortToast("刪除失敗！")
+                        showShortToast(R.string.delete_failed)
                         state.throwable.printStackTrace()
                     }
 
@@ -127,9 +142,7 @@ class MyFavVideoFragment : YenalyFragment<FragmentPageListBinding, MyListViewMod
                     }
 
                     is WebsiteState.Success -> {
-                        val index = state.info
-                        showShortToast("刪除成功！")
-                        adapter.removeAt(index)
+                        showShortToast(R.string.delete_success)
                     }
                 }
             }
@@ -138,16 +151,17 @@ class MyFavVideoFragment : YenalyFragment<FragmentPageListBinding, MyListViewMod
 
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
-        binding.rvPageList.layoutManager = GridLayoutManager(context, SIMPLIFIED_VIDEO_IN_ONE_LINE)
+        binding.rvPageList.layoutManager =
+            GridLayoutManager(context, VideoCoverSize.Simplified.videoInOneLine)
     }
 
     private fun getMyFavVideo() {
-        viewModel.getMyFavVideoItems(page)
+        viewModel.fav.getMyFavVideoItems(page)
     }
 
     private fun getNewMyFavVideo() {
         page = 1
-        adapter.items = emptyList()
+        viewModel.fav.clearMyListItems()
         getMyFavVideo()
     }
 
@@ -162,9 +176,9 @@ class MyFavVideoFragment : YenalyFragment<FragmentPageListBinding, MyListViewMod
             when (menuItem.itemId) {
                 R.id.tb_help -> {
                     requireContext().showAlertDialog {
-                        setTitle("使用注意！")
-                        setMessage("长按可以取消喜歡！")
-                        setPositiveButton("OK", null)
+                        setTitle(R.string.attention)
+                        setMessage(R.string.long_press_to_cancel_fav)
+                        setPositiveButton(R.string.ok, null)
                     }
                     return@addMenu true
                 }

@@ -3,11 +3,15 @@ package com.yenaly.han1meviewer.ui.fragment.home
 import android.annotation.SuppressLint
 import android.content.res.Configuration
 import android.os.Bundle
+import android.view.LayoutInflater
+import android.view.ViewGroup
+import androidx.fragment.app.activityViewModels
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
-import androidx.lifecycle.whenStarted
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.recyclerview.widget.GridLayoutManager
 import com.yenaly.han1meviewer.R
-import com.yenaly.han1meviewer.SIMPLIFIED_VIDEO_IN_ONE_LINE
+import com.yenaly.han1meviewer.VideoCoverSize
 import com.yenaly.han1meviewer.databinding.FragmentPageListBinding
 import com.yenaly.han1meviewer.logic.state.PageLoadingState
 import com.yenaly.han1meviewer.logic.state.WebsiteState
@@ -17,11 +21,11 @@ import com.yenaly.han1meviewer.ui.adapter.HanimeMyListVideoAdapter
 import com.yenaly.han1meviewer.ui.fragment.IToolbarFragment
 import com.yenaly.han1meviewer.ui.fragment.LoginNeededFragmentMixin
 import com.yenaly.han1meviewer.ui.viewmodel.MyListViewModel
-import com.yenaly.han1meviewer.util.notNull
 import com.yenaly.han1meviewer.util.showAlertDialog
 import com.yenaly.yenaly_libs.base.YenalyFragment
 import com.yenaly.yenaly_libs.utils.showShortToast
 import com.yenaly.yenaly_libs.utils.unsafeLazy
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 
 /**
@@ -29,31 +33,38 @@ import kotlinx.coroutines.launch
  * @author Yenaly Liew
  * @time 2022/07/04 004 22:42
  */
-class MyWatchLaterFragment : YenalyFragment<FragmentPageListBinding, MyListViewModel>(),
+class MyWatchLaterFragment : YenalyFragment<FragmentPageListBinding>(),
     IToolbarFragment<MainActivity>, LoginNeededFragmentMixin, StateLayoutMixin {
+
+    val viewModel by activityViewModels<MyListViewModel>()
 
     private var page: Int
         set(value) {
-            viewModel.watchLaterPage = value
+            viewModel.watchLater.watchLaterPage = value
         }
-        get() = viewModel.watchLaterPage
+        get() = viewModel.watchLater.watchLaterPage
 
     private val adapter by unsafeLazy { HanimeMyListVideoAdapter() }
+
+    override fun getViewBinding(
+        inflater: LayoutInflater,
+        container: ViewGroup?
+    ): FragmentPageListBinding {
+        return FragmentPageListBinding.inflate(inflater, container, false)
+    }
 
     override fun initData(savedInstanceState: Bundle?) {
         checkLogin()
         (activity as MainActivity).setupToolbar()
         binding.state.init()
 
-        getNewMyWatchLater()
-
         adapter.setOnItemLongClickListener { _, _, position ->
-            val item = adapter.getItem(position).notNull()
+            val item = adapter.getItem(position) ?: return@setOnItemLongClickListener true
             requireContext().showAlertDialog {
-                setTitle("刪除待看")
-                setMessage(getString(R.string.sure_to_delete_s_video, item.title))
+                setTitle(R.string.delete_watch_later)
+                setMessage(getString(R.string.sure_to_delete_s, item.title))
                 setPositiveButton(R.string.confirm) { _, _ ->
-                    viewModel.deleteMyWatchLater(item.videoCode, position)
+                    viewModel.watchLater.deleteMyWatchLater(item.videoCode, position)
                 }
                 setNegativeButton(R.string.cancel, null)
             }
@@ -61,7 +72,7 @@ class MyWatchLaterFragment : YenalyFragment<FragmentPageListBinding, MyListViewM
         }
 
         binding.rvPageList.apply {
-            layoutManager = GridLayoutManager(context, SIMPLIFIED_VIDEO_IN_ONE_LINE)
+            layoutManager = GridLayoutManager(context, VideoCoverSize.Simplified.videoInOneLine)
             adapter = this@MyWatchLaterFragment.adapter
         }
 
@@ -79,8 +90,8 @@ class MyWatchLaterFragment : YenalyFragment<FragmentPageListBinding, MyListViewM
     @SuppressLint("SetTextI18n")
     override fun bindDataObservers() {
         viewLifecycleOwner.lifecycleScope.launch {
-            whenStarted {
-                viewModel.watchLaterFlow.collect { state ->
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                viewModel.watchLater.watchLaterStateFlow.collect { state ->
                     when (state) {
                         is PageLoadingState.Error -> {
                             binding.srlPageList.finishRefresh()
@@ -91,20 +102,18 @@ class MyWatchLaterFragment : YenalyFragment<FragmentPageListBinding, MyListViewM
 
                         is PageLoadingState.Loading -> {
                             adapter.stateView = null
-                            if (adapter.items.isEmpty()) binding.srlPageList.autoRefreshAnimationOnly()
+                            if (viewModel.watchLater.watchLaterFlow.value.isEmpty()) binding.srlPageList.autoRefresh()
                         }
 
                         is PageLoadingState.NoMoreData -> {
                             binding.srlPageList.finishLoadMoreWithNoMoreData()
-                            if (adapter.items.isEmpty()) binding.state.showEmpty()
+                            if (viewModel.watchLater.watchLaterFlow.value.isEmpty()) binding.state.showEmpty()
                         }
 
                         is PageLoadingState.Success -> {
                             page++
                             binding.srlPageList.finishRefresh()
                             binding.srlPageList.finishLoadMore(true)
-                            viewModel.csrfToken = state.info.csrfToken
-                            adapter.addAll(state.info.hanimeInfo)
                             binding.state.showContent()
                         }
                     }
@@ -113,10 +122,18 @@ class MyWatchLaterFragment : YenalyFragment<FragmentPageListBinding, MyListViewM
         }
 
         viewLifecycleOwner.lifecycleScope.launch {
-            viewModel.deleteMyWatchLaterFlow.collect { state ->
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                viewModel.watchLater.watchLaterFlow.collectLatest {
+                    adapter.submitList(it)
+                }
+            }
+        }
+
+        viewLifecycleOwner.lifecycleScope.launch {
+            viewModel.watchLater.deleteMyWatchLaterFlow.collect { state ->
                 when (state) {
                     is WebsiteState.Error -> {
-                        showShortToast("刪除失敗！")
+                        showShortToast(R.string.delete_failed)
                         state.throwable.printStackTrace()
                     }
 
@@ -124,9 +141,7 @@ class MyWatchLaterFragment : YenalyFragment<FragmentPageListBinding, MyListViewM
                     }
 
                     is WebsiteState.Success -> {
-                        val index = state.info
-                        showShortToast("刪除成功！")
-                        adapter.removeAt(index)
+                        showShortToast(R.string.delete_success)
                     }
                 }
             }
@@ -135,16 +150,17 @@ class MyWatchLaterFragment : YenalyFragment<FragmentPageListBinding, MyListViewM
 
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
-        binding.rvPageList.layoutManager = GridLayoutManager(context, SIMPLIFIED_VIDEO_IN_ONE_LINE)
+        binding.rvPageList.layoutManager =
+            GridLayoutManager(context, VideoCoverSize.Simplified.videoInOneLine)
     }
 
     private fun getMyWatchLater() {
-        viewModel.getMyWatchLaterItems(page)
+        viewModel.watchLater.getMyWatchLaterItems(page)
     }
 
     private fun getNewMyWatchLater() {
         page = 1
-        adapter.items = emptyList()
+        viewModel.watchLater.clearMyListItems()
         getMyWatchLater()
     }
 
@@ -159,9 +175,9 @@ class MyWatchLaterFragment : YenalyFragment<FragmentPageListBinding, MyListViewM
             when (menuItem.itemId) {
                 R.id.tb_help -> {
                     requireContext().showAlertDialog {
-                        setTitle("使用注意！")
-                        setMessage("长按可以取消待看！")
-                        setPositiveButton("OK", null)
+                        setTitle(R.string.attention)
+                        setMessage(R.string.long_press_to_cancel_watch_later)
+                        setPositiveButton(R.string.ok, null)
                     }
                     return@addMenu true
                 }

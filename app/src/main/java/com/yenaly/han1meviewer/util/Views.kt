@@ -1,55 +1,68 @@
 package com.yenaly.han1meviewer.util
 
-import android.app.Activity
-import android.content.Context
-import android.view.LayoutInflater
+import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
+import android.widget.TextView
 import androidx.annotation.DrawableRes
-import com.google.android.material.chip.Chip
-import com.google.android.material.chip.ChipGroup
-import com.google.android.material.dialog.MaterialAlertDialogBuilder
-import com.yenaly.han1meviewer.FROM_VIDEO_TAG
-import com.yenaly.han1meviewer.R
-import com.yenaly.han1meviewer.ui.activity.SearchActivity
-import com.yenaly.yenaly_libs.utils.copyToClipboard
-import com.yenaly.yenaly_libs.utils.showShortToast
-import com.yenaly.yenaly_libs.utils.startActivity
+import androidx.annotation.GravityInt
+import androidx.annotation.Px
+import androidx.core.view.children
+import com.google.android.material.badge.BadgeDrawable
+import com.google.android.material.tabs.TabLayout
 
-/**
- * dynamically create tag chips.
- */
-@Deprecated("Use [CollapsibleTags] instead.")
-internal fun ChipGroup.createTags(tags: List<String>) {
-    for (tag in tags) {
-        val chip = LayoutInflater.from(context)
-            .inflate(R.layout.item_video_tag_chip, this, false) as Chip
-        chip.text = tag
-        chip.setOnClickListener {
-            (context as? Activity)?.startActivity<SearchActivity>(FROM_VIDEO_TAG to tag)
+fun Button.setDrawableTop(@DrawableRes drawableRes: Int) {
+    this.setCompoundDrawablesWithIntrinsicBounds(0, drawableRes, 0, 0)
+}
+
+fun TabLayout.getTextViewAt(position: Int): TextView? {
+    val container = getChildAt(0) as? ViewGroup
+    val tab = container?.getChildAt(position) as? ViewGroup
+    return tab?.children?.filterIsInstance<TextView>()?.singleOrNull()
+}
+
+fun TabLayout.getOrCreateBadgeOnTextViewAt(
+    position: Int,
+    targetView: View?,
+    @GravityInt gravity: Int,
+    @Px spacing: Int = 0,
+    action: BadgeDrawable.() -> Unit
+) {
+    val tab = getTabAt(position) ?: return
+    val target = targetView ?: getTextViewAt(position)
+    target?.post {
+        tab.orCreateBadge.apply(action).apply {
+            setGravity(target, gravity, spacing)
         }
-        chip.setOnLongClickListener {
-            tag.copyToClipboard()
-            // todo: strings.xml
-            showShortToast("「$tag」已複製到剪貼簿")
-            return@setOnLongClickListener true
-        }
-        this.addView(chip)
     }
 }
 
-/**
- * 刪除自己
- */
-fun View.removeItself() {
-    (parent as? ViewGroup)?.removeView(this)
-}
+fun BadgeDrawable.setGravity(
+    targetView: View,
+    @GravityInt gravity: Int,
+    @Px spacing: Int = 0
+) {
+    badgeGravity = BadgeDrawable.TOP_END
+    when (gravity) {
+        Gravity.START -> {
+            verticalOffset = (targetView.height + this.intrinsicHeight) / 2
+            horizontalOffset = targetView.width + this.intrinsicWidth + spacing
+        }
 
-internal inline fun Context.showAlertDialog(action: MaterialAlertDialogBuilder.() -> Unit) {
-    MaterialAlertDialogBuilder(this).apply(action).show()
-}
+        Gravity.END -> {
+            verticalOffset = (targetView.height + this.intrinsicHeight) / 2
+            horizontalOffset = -spacing
+        }
 
-internal fun Button.setDrawableTop(@DrawableRes drawableRes: Int) {
-    this.setCompoundDrawablesWithIntrinsicBounds(0, drawableRes, 0, 0)
+        Gravity.BOTTOM -> {
+            verticalOffset = targetView.height + this.intrinsicHeight + spacing
+            horizontalOffset = (targetView.width + this.intrinsicWidth) / 2
+        }
+
+        Gravity.TOP -> {
+            verticalOffset = -spacing
+            horizontalOffset = (targetView.width + this.intrinsicWidth) / 2
+        }
+    }
 }

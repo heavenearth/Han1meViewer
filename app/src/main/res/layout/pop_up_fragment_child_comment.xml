@@ -9,7 +9,6 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:background="@drawable/shape_reply_show_bottom_dialog"
-        android:clipToPadding="false"
         android:orientation="vertical"
         android:padding="8dp">
 
@@ -22,6 +21,7 @@
             android:background="#80FFFFFF" />
 
         <TextView
+            android:id="@+id/tv_child_comment"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginBottom="8dp"
@@ -31,7 +31,8 @@
         <androidx.recyclerview.widget.RecyclerView
             android:id="@+id/rv_reply"
             android:layout_width="match_parent"
-            android:layout_height="match_parent" />
+            android:layout_height="match_parent"
+            android:clipToPadding="false" />
 
     </LinearLayout>
 </layout>

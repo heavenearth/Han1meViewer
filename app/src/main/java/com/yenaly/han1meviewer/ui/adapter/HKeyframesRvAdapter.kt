@@ -1,12 +1,12 @@
 package com.yenaly.han1meviewer.ui.adapter
 
 import android.content.Context
-import android.text.method.LinkMovementMethod
 import android.util.Base64
 import android.view.View
 import android.view.ViewGroup
 import android.widget.ImageButton
 import android.widget.TextView
+import androidx.core.text.method.LinkMovementMethodCompat
 import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
@@ -21,7 +21,6 @@ import com.yenaly.han1meviewer.VIDEO_CODE
 import com.yenaly.han1meviewer.logic.entity.HKeyframeEntity
 import com.yenaly.han1meviewer.ui.activity.SettingsActivity
 import com.yenaly.han1meviewer.ui.activity.VideoActivity
-import com.yenaly.han1meviewer.util.notNull
 import com.yenaly.han1meviewer.util.showAlertDialog
 import com.yenaly.yenaly_libs.utils.activity
 import com.yenaly.yenaly_libs.utils.copyToClipboard
@@ -64,11 +63,11 @@ class HKeyframesRvAdapter : BaseDifferAdapter<HKeyframeEntity, QuickViewHolder>(
     }
 
     override fun onBindViewHolder(holder: QuickViewHolder, position: Int, item: HKeyframeEntity?) {
-        item.notNull()
+        item ?: return
         holder.setText(R.id.tv_title, item.title)
         holder.setGone(R.id.btn_edit, item.author != null)
         holder.getView<TextView>(R.id.tv_video_code).apply {
-            movementMethod = LinkMovementMethod.getInstance()
+            movementMethod = LinkMovementMethodCompat.getInstance()
             text = spannable {
                 context.getString(R.string.h_keyframe_title_prefix).text()
                 item.videoCode.span {
@@ -96,9 +95,9 @@ class HKeyframesRvAdapter : BaseDifferAdapter<HKeyframeEntity, QuickViewHolder>(
             viewHolder.getView<ImageButton>(R.id.btn_edit).apply {
                 setOnClickListener { view ->
                     val position = viewHolder.bindingAdapterPosition
-                    val item = getItem(position).notNull()
+                    val item = getItem(position) ?: return@setOnClickListener
                     XPopup.Builder(view.context).atView(view).isDarkTheme(true).asAttachList(
-                        Array(editResArray.size) { idx -> view.context.getString(editResArray[idx]) },
+                        editResArray.map(view.context::getString).toTypedArray(),
                         editResIconArray
                     ) { pos, _ ->
                         when (pos) {
@@ -123,9 +122,9 @@ class HKeyframesRvAdapter : BaseDifferAdapter<HKeyframeEntity, QuickViewHolder>(
             append("<<<")
         }
         context.showAlertDialog {
-            setTitle(R.string.share_to_other)
-            setMessage("複製以下内容，分享給其他人，可以透過頂部右側添加按鈕來將其存入設備：\n$toContent")
-            setPositiveButton(R.string.copy) { _, _ ->
+            setTitle(R.string.share_to_others)
+            setMessage(context.getString(R.string.share_to_others_tip, toContent))
+            setPositiveButton(R.string.copy_) { _, _ ->
                 toContent.copyToClipboard()
                 showShortToast(R.string.copy_to_clipboard)
             }
@@ -191,6 +190,8 @@ class HKeyframeRvAdapter(
      */
     var isLocal: Boolean = true
 
+    var isShared: Boolean = false
+
     companion object {
         val COMPARATOR = object : DiffUtil.ItemCallback<HKeyframeEntity.Keyframe>() {
             override fun areItemsTheSame(
@@ -210,7 +211,7 @@ class HKeyframeRvAdapter(
         position: Int,
         item: HKeyframeEntity.Keyframe?,
     ) {
-        item.notNull()
+        item ?: return
         holder.setText(R.id.tv_keyframe, JZUtils.stringForTime(item.position))
         holder.setText(R.id.tv_index, "#${holder.bindingAdapterPosition + 1}")
 
@@ -231,10 +232,11 @@ class HKeyframeRvAdapter(
         viewType: Int,
     ): QuickViewHolder {
         return QuickViewHolder(R.layout.item_h_keyframe, parent).also { viewHolder ->
+            if (isShared) return@also
             viewHolder.getView<MaterialButton>(R.id.btn_edit).apply {
                 setOnClickListener {
                     val position = viewHolder.bindingAdapterPosition
-                    val item = getItem(position).notNull()
+                    val item = getItem(position) ?: return@setOnClickListener
 
                     val view = View.inflate(context, R.layout.dialog_modify_h_keyframe, null)
                     val etPrompt = view.findViewById<TextView>(R.id.et_prompt)
@@ -256,7 +258,7 @@ class HKeyframeRvAdapter(
                                             prompt = prompt
                                         )
                                     )
-                                    showShortToast("修改成功")
+                                    showShortToast(R.string.modify_success)
                                 }
 
                                 is VideoActivity -> {
@@ -277,7 +279,7 @@ class HKeyframeRvAdapter(
             viewHolder.getView<MaterialButton>(R.id.btn_delete).apply {
                 setOnClickListener {
                     val position = viewHolder.bindingAdapterPosition
-                    val item = getItem(position).notNull()
+                    val item = getItem(position) ?: return@setOnClickListener
                     it.context.showAlertDialog {
                         setTitle(R.string.sure_to_delete)
                         setMessage(JZUtils.stringForTime(item.position))
@@ -285,7 +287,7 @@ class HKeyframeRvAdapter(
                             when (context) {
                                 is SettingsActivity -> {
                                     context.viewModel.removeHKeyframe(videoCode, item)
-                                    showShortToast("刪除成功")
+                                    showShortToast(R.string.delete_success)
                                 }
 
                                 is VideoActivity -> {

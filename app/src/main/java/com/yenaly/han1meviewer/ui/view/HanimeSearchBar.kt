@@ -1,15 +1,14 @@
 package com.yenaly.han1meviewer.ui.view
 
-import android.animation.ValueAnimator
+import android.animation.LayoutTransition
 import android.content.Context
+import android.os.Parcelable
 import android.util.AttributeSet
 import android.util.Log
-import android.view.KeyEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
 import android.widget.FrameLayout
-import androidx.core.view.updateLayoutParams
 import androidx.core.widget.addTextChangedListener
 import androidx.interpolator.view.animation.FastOutSlowInInterpolator
 import androidx.recyclerview.widget.LinearLayoutManager
@@ -24,6 +23,7 @@ import com.yenaly.yenaly_libs.utils.activity
 import com.yenaly.yenaly_libs.utils.view.hideIme
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.parcelize.Parcelize
 
 /**
  * 搜索界面的搜索栏
@@ -38,17 +38,17 @@ class HanimeSearchBar @JvmOverloads constructor(
 
     companion object {
         val animInterpolator = FastOutSlowInInterpolator()
-        const val animDuration = 300L
+        const val ANIM_DURATION = 300L
     }
 
     private val window = checkNotNull(context.activity?.window)
 
-    private val searchBar: ViewGroup
-    private val back: MaterialButton
-    private val search: MaterialButton
-    private val tag: MaterialButton
-    private val rvHistory: RecyclerView
-    private val etSearch: TextInputEditText
+    private val root = inflate(context, R.layout.layout_hanime_search_bar, this) as ViewGroup
+    private val back: MaterialButton = findViewById(R.id.btn_back)
+    private val search: MaterialButton = findViewById(R.id.btn_search)
+    private val tag: MaterialButton = findViewById(R.id.btn_tag)
+    private val rvHistory: RecyclerView = findViewById(R.id.rv_history)
+    private val etSearch: TextInputEditText = findViewById(R.id.et_search)
 
     /**
      * 历史记录是否折叠
@@ -56,29 +56,40 @@ class HanimeSearchBar @JvmOverloads constructor(
     private var isCollapsed = true
 
     init {
-        inflate(context, R.layout.layout_hanime_search_bar, this)
-        searchBar = findViewById(R.id.search_bar)
-        back = findViewById(R.id.btn_back)
-        search = findViewById(R.id.btn_search)
-        tag = findViewById(R.id.btn_tag)
-        rvHistory = findViewById(R.id.rv_history)
-        etSearch = findViewById(R.id.et_search)
-
         // init
+        root.layoutTransition = LayoutTransition().apply {
+            enableTransitionType(LayoutTransition.CHANGING)
+            setDuration(LayoutTransition.CHANGING, ANIM_DURATION)
+            setInterpolator(LayoutTransition.CHANGING, animInterpolator)
+        }
         rvHistory.layoutManager = LinearLayoutManager(context)
-        rvHistory.itemAnimator?.removeDuration = 0
+
+        // #issue-176: 禁用默认动画，涉及到许多崩溃，到现在官方也没解决问题，不得不牺牲体验
+        // 根本问题：RecyclerView 的 itemAnimator 与 LayoutTransition 有冲突
+        // 与其相关的网站链接：
+        // https://github.com/google/flexbox-layout/issues/240
+        // https://github.com/airbnb/epoxy/issues/689
+        // https://stackoverflow.com/questions/30078834
+        rvHistory.itemAnimator = null
+
         etSearch.setOnEditorActionListener { _, actionId, _ ->
             if (actionId == EditorInfo.IME_ACTION_SEARCH) {
                 onSearchClickListener?.let { listener ->
                     listener(etSearch, etSearch.text?.toString().orEmpty())
                     true
-                } ?: false
+                } == true
             }
             false
         }
     }
 
-    var adapter: BaseQuickAdapter<SearchHistoryEntity, out QuickViewHolder>? = null
+    var canTextChange: Boolean = true
+        set(value) {
+            field = value
+            etSearch.isEnabled = value
+        }
+
+    var historyAdapter: BaseQuickAdapter<SearchHistoryEntity, out QuickViewHolder>? = null
         set(value) {
             field = value
             rvHistory.adapter = value
@@ -134,7 +145,7 @@ class HanimeSearchBar @JvmOverloads constructor(
                 trySend(searchText)
                 Log.d("HanimeSearchBar", "focus: $searchText")
             } else {
-                if (!isCollapsed) hideHistory()
+                hideHistory()
             }
         }
 
@@ -144,74 +155,75 @@ class HanimeSearchBar @JvmOverloads constructor(
         }
     }
 
-    var history
-        get() = adapter?.items.orEmpty()
-        set(value) {
-            adapter?.also {
-                it.submitList(value)
-            }
-        }
-
     fun showHistory() {
-        rvHistory.animate()
-            .setInterpolator(animInterpolator)
-            .setDuration(animDuration)
-            .alpha(1F)
-            .withStartAction { rvHistory.visibility = VISIBLE }
-            .start()
+//        val slide = Slide(Gravity.BOTTOM).apply {
+//            duration = animDuration
+//            interpolator = animInterpolator
+//            addTarget(rvHistory)
+//        }
+//        TransitionManager.beginDelayedTransition(searchBar, slide)
 
+        rvHistory.visibility = VISIBLE
         back.animate()
             .setInterpolator(animInterpolator)
-            .setDuration(animDuration)
+            .setDuration(ANIM_DURATION)
             .rotation(45F)
             .start()
         isCollapsed = false
     }
 
-    fun hideHistory() {
+    fun hideHistory(): Boolean {
+        if (isCollapsed) return false
+        etSearch.hideIme(window)
+        Log.d("HanimeSearchBar", "History Height: ${rvHistory.height}")
+//        val slide = Slide(Gravity.TOP).apply {
+//            duration = animDuration
+//            interpolator = animInterpolator
+//            addTarget(rvHistory)
+//        }
+//        TransitionManager.beginDelayedTransition(searchBar, slide)
+
+        rvHistory.visibility = GONE
+        back.animate()
+            .setInterpolator(animInterpolator)
+            .setDuration(ANIM_DURATION)
+            .rotation(0F)
+            .start()
+        isCollapsed = true
+        return true
+    }
+
+    // 使用 onBackPressedDispatcher.addCallback 替换
+    // 这个方法在 API 34 以上（貌似）无法返回 key event
+    //
+    // override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+    //     if (event.keyCode == KeyEvent.KEYCODE_BACK && !isCollapsed) {
+    //         hideHistory()
+    //         return true
+    //     }
+    //     return super.dispatchKeyEvent(event)
+    // }
+
+    override fun onSaveInstanceState(): Parcelable {
+        return SavedState(super.onSaveInstanceState(), isCollapsed)
+    }
+
+    override fun onRestoreInstanceState(state: Parcelable?) {
+        if (state !is SavedState) {
+            super.onRestoreInstanceState(state)
+            return
+        }
+
+        super.onRestoreInstanceState(state.superState)
+        this.isCollapsed = state.isCollapsed
         if (!isCollapsed) {
-            etSearch.hideIme(window)
-            Log.d("HanimeSearchBar", "History Height: ${rvHistory.height}")
-            rvHistory.visibility = GONE
-            back.animate()
-                .setInterpolator(animInterpolator)
-                .setDuration(animDuration)
-                .rotation(0F)
-                .start()
-            isCollapsed = true
+            showHistory()
         }
     }
 
-    private fun View.buildHeightAnimation(
-        from: Int, to: Int,
-    ): ValueAnimator? {
-        if (from == to) return null
-        return ValueAnimator.ofInt(from, to).apply {
-            duration = animDuration
-            interpolator = animInterpolator
-            addUpdateListener {
-                val value = it.animatedValue as Int
-                updateLayoutParams {
-                    height = value
-                }
-            }
-        }
-    }
-
-    private fun View.calcHeight(): Int {
-        val matchParentMeasureSpec =
-            MeasureSpec.makeMeasureSpec((parent as View).width, MeasureSpec.EXACTLY)
-        val wrapContentMeasureSpec =
-            MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED)
-        measure(matchParentMeasureSpec, wrapContentMeasureSpec)
-        return measuredHeight
-    }
-
-    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-        if (event.keyCode == KeyEvent.KEYCODE_BACK && !isCollapsed) {
-            hideHistory()
-            return true
-        }
-        return super.dispatchKeyEvent(event)
-    }
+    @Parcelize
+    data class SavedState(
+        val ss: Parcelable?,
+        val isCollapsed: Boolean
+    ) : BaseSavedState(ss)
 }

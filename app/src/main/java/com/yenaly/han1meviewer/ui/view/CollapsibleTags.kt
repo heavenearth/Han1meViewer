@@ -2,6 +2,7 @@ package com.yenaly.han1meviewer.ui.view
 
 import android.animation.ValueAnimator
 import android.content.Context
+import android.os.Parcelable
 import android.util.AttributeSet
 import android.view.LayoutInflater
 import android.view.View
@@ -18,11 +19,14 @@ import com.google.android.material.chip.ChipGroup
 import com.yenaly.han1meviewer.ADVANCED_SEARCH_MAP
 import com.yenaly.han1meviewer.R
 import com.yenaly.han1meviewer.ui.activity.SearchActivity
+import com.yenaly.han1meviewer.util.addUpdateListener
 import com.yenaly.yenaly_libs.utils.activity
 import com.yenaly.yenaly_libs.utils.copyToClipboard
 import com.yenaly.yenaly_libs.utils.showShortToast
 import com.yenaly.yenaly_libs.utils.startActivity
 import kotlinx.coroutines.launch
+import kotlinx.parcelize.Parcelize
+
 
 /**
  * 可折叠 TAG 栏
@@ -38,7 +42,7 @@ class CollapsibleTags @JvmOverloads constructor(
 
     companion object {
         val animInterpolator = FastOutSlowInInterpolator()
-        const val animDuration = 300L
+        const val ANIM_DURATION = 300L
     }
 
     /**
@@ -62,6 +66,20 @@ class CollapsibleTags @JvmOverloads constructor(
         set(value) {
             field = value
             toggleButton.isVisible = value
+        }
+
+    /**
+     * 從這裏設置tags
+     *
+     * post很重要，因為要等到View被加入到Window才能取得父View的寬度，
+     * 在RecyclerView中不這麽設置會出現問題。
+     */
+    var tags: List<String>? = null
+        set(value) {
+            field = value
+            post {
+                setTagsInternal(value ?: emptyList())
+            }
         }
 
     private var tagViewList: MutableList<Chip>? = null
@@ -96,22 +114,9 @@ class CollapsibleTags @JvmOverloads constructor(
         }
 
         post {
-            toggleButton.animate().rotation(if (isCollapsed) 0F else 180F).setDuration(animDuration)
+            toggleButton.animate().rotation(if (isCollapsed) 0F else 180F)
+                .setDuration(ANIM_DURATION)
                 .setInterpolator(animInterpolator).start()
-        }
-    }
-
-    /**
-     * 從這裏設置tags
-     *
-     * post很重要，因為要等到View被加入到Window才能取得父View的寬度，
-     * 在RecyclerView中不這麽設置會出現問題。
-     *
-     * @param tags 標籤列表
-     */
-    fun setTags(tags: List<String>) {
-        post {
-            setTagsInternal(tags)
         }
     }
 
@@ -127,8 +132,7 @@ class CollapsibleTags @JvmOverloads constructor(
                     }
                     setOnLongClickListener {
                         tag.copyToClipboard()
-                        // todo: strings.xml
-                        showShortToast("「$tag」已複製到剪貼簿")
+                        showShortToast(context.getString(R.string.s_copy_to_clipboard, tag))
                         return@setOnLongClickListener true
                     }
                 }
@@ -137,18 +141,18 @@ class CollapsibleTags @JvmOverloads constructor(
     }
 
     private fun handleWhenCollapsed(isCollapsed: Boolean) {
-        toggleButton.animate().rotation(if (isCollapsed) 0F else 180F).setDuration(animDuration)
+        toggleButton.animate().rotation(if (isCollapsed) 0F else 180F).setDuration(ANIM_DURATION)
             .setInterpolator(animInterpolator).start()
 
         if (isCollapsed) {
-            chipGroup.animate().setDuration(animDuration).setInterpolator(animInterpolator)
+            chipGroup.animate().setDuration(ANIM_DURATION).setInterpolator(animInterpolator)
                 .alpha(0F).withStartAction {
                     collapseValueAnimator?.start()
                 }.withEndAction {
                     chipGroup.visibility = INVISIBLE
                 }.start()
         } else {
-            chipGroup.animate().setDuration(animDuration).setInterpolator(animInterpolator)
+            chipGroup.animate().setDuration(ANIM_DURATION).setInterpolator(animInterpolator)
                 .alpha(1F).withStartAction {
                     chipGroup.visibility = VISIBLE
                     expandValueAnimator?.start()
@@ -166,9 +170,9 @@ class CollapsibleTags @JvmOverloads constructor(
 
     private fun buildChipGroupAnimator(start: Int, end: Int): ValueAnimator {
         return ValueAnimator.ofInt(start, end).apply {
-            duration = animDuration
+            duration = ANIM_DURATION
             interpolator = animInterpolator
-            addUpdateListener {
+            addUpdateListener(lifecycle) {
                 val value = it.animatedValue as Int
                 chipGroup.updateLayoutParams {
                     height = value
@@ -176,4 +180,33 @@ class CollapsibleTags @JvmOverloads constructor(
             }
         }
     }
+
+    override fun onSaveInstanceState(): Parcelable {
+        return SavedState(
+            super.onSaveInstanceState(),
+            isCollapsed, isCollapsedEnabled, chipGroupMeasureHeight, tags
+        )
+    }
+
+    override fun onRestoreInstanceState(state: Parcelable?) {
+        if (state !is SavedState) {
+            super.onRestoreInstanceState(state)
+            return
+        }
+
+        super.onRestoreInstanceState(state.superState)
+        this.isCollapsed = state.isCollapsed
+        this.isCollapsedEnabled = state.isCollapsedEnabled
+        this.chipGroupMeasureHeight = state.chipGroupMeasureHeight
+        this.tags = state.tags
+    }
+
+    @Parcelize
+    data class SavedState(
+        val ss: Parcelable?,
+        val isCollapsed: Boolean,
+        val isCollapsedEnabled: Boolean,
+        val chipGroupMeasureHeight: Int,
+        val tags: List<String>?
+    ) : BaseSavedState(ss)
 }

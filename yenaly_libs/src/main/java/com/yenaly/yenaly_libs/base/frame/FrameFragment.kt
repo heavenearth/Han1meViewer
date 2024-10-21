@@ -1,7 +1,13 @@
 package com.yenaly.yenaly_libs.base.frame
 
-import android.view.*
+import android.view.LayoutInflater
+import android.view.Menu
+import android.view.MenuInflater
+import android.view.MenuItem
+import android.view.ViewGroup
+import android.view.Window
 import android.widget.TextView
+import androidx.annotation.LayoutRes
 import androidx.annotation.MenuRes
 import androidx.appcompat.app.AlertDialog
 import androidx.core.view.MenuProvider
@@ -16,12 +22,16 @@ import com.yenaly.yenaly_libs.utils.dp
  * @author : Yenaly Liew
  * @time : 2022/04/16 016 20:25
  */
-abstract class FrameFragment : Fragment() {
+abstract class FrameFragment : Fragment {
+
+    constructor() : super()
+    constructor(@LayoutRes resId: Int) : super(resId)
 
     val window: Window get() = requireActivity().window
 
     private lateinit var loadingDialog: AlertDialog
 
+    @Deprecated("狗都不用")
     @JvmOverloads
     open fun showLoadingDialog(
         loadingText: String = getString(R.string.yenaly_loading),
@@ -40,6 +50,7 @@ abstract class FrameFragment : Fragment() {
         loadingDialog.window?.setLayout(dialogWidth, dialogHeight)
     }
 
+    @Deprecated("狗都不用")
     open fun hideLoadingDialog() {
         if (this::loadingDialog.isInitialized) {
             loadingDialog.hide()

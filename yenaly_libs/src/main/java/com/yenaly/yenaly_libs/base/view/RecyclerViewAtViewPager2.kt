@@ -32,6 +32,7 @@ class RecyclerViewAtViewPager2 : RecyclerView {
                 startY = ev.y.toInt()
                 parent.requestDisallowInterceptTouchEvent(true)
             }
+
             MotionEvent.ACTION_MOVE -> {
                 val endX = ev.x.toInt()
                 val endY = ev.y.toInt()
@@ -48,6 +49,7 @@ class RecyclerViewAtViewPager2 : RecyclerView {
                     parent.requestDisallowInterceptTouchEvent(false)
                 }
             }
+
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                 parent.requestDisallowInterceptTouchEvent(false)
             }

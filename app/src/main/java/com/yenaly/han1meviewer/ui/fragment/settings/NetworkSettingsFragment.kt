@@ -1,5 +1,6 @@
 package com.yenaly.han1meviewer.ui.fragment.settings
 
+import android.annotation.SuppressLint
 import android.os.Bundle
 import android.view.View
 import androidx.annotation.IdRes
@@ -7,10 +8,9 @@ import androidx.annotation.LayoutRes
 import androidx.appcompat.app.AlertDialog
 import androidx.core.content.edit
 import androidx.preference.Preference
-import androidx.preference.SwitchPreferenceCompat
 import com.google.android.material.chip.ChipGroup
-import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.textfield.TextInputEditText
+import com.yenaly.han1meviewer.EMPTY_STRING
 import com.yenaly.han1meviewer.HANIME_ALTER_BASE_URL
 import com.yenaly.han1meviewer.HANIME_ALTER_HOSTNAME
 import com.yenaly.han1meviewer.HANIME_MAIN_BASE_URL
@@ -22,9 +22,12 @@ import com.yenaly.han1meviewer.logic.network.HanimeNetwork
 import com.yenaly.han1meviewer.logout
 import com.yenaly.han1meviewer.ui.activity.SettingsActivity
 import com.yenaly.han1meviewer.ui.fragment.IToolbarFragment
-import com.yenaly.han1meviewer.ui.view.MaterialDialogPreference
+import com.yenaly.han1meviewer.ui.view.pref.MaterialDialogPreference
+import com.yenaly.han1meviewer.util.createAlertDialog
 import com.yenaly.han1meviewer.util.showAlertDialog
-import com.yenaly.yenaly_libs.ActivitiesManager
+import com.yenaly.han1meviewer.util.showWithBlurEffect
+import com.yenaly.yenaly_libs.ActivityManager
+import com.yenaly.yenaly_libs.base.preference.MaterialSwitchPreference
 import com.yenaly.yenaly_libs.base.settings.YenalySettingsFragment
 import com.yenaly.yenaly_libs.utils.showShortToast
 import com.yenaly.yenaly_libs.utils.unsafeLazy
@@ -51,7 +54,7 @@ class NetworkSettingsFragment : YenalySettingsFragment(R.xml.settings_network),
     private val domainName
             by safePreference<MaterialDialogPreference>(DOMAIN_NAME)
     private val useBuiltInHosts
-            by safePreference<SwitchPreferenceCompat>(USE_BUILT_IN_HOSTS)
+            by safePreference<MaterialSwitchPreference>(USE_BUILT_IN_HOSTS)
 
     private val proxyDialog by unsafeLazy {
         ProxyDialog(proxy, R.layout.dialog_proxy)
@@ -75,7 +78,10 @@ class NetworkSettingsFragment : YenalySettingsFragment(R.xml.settings_network),
             }
         }
         domainName.apply {
-            entries = arrayOf("$HANIME_MAIN_HOSTNAME (預設)", "$HANIME_ALTER_HOSTNAME (備用)")
+            entries = arrayOf(
+                "$HANIME_MAIN_HOSTNAME (${getString(R.string.default_)})",
+                "$HANIME_ALTER_HOSTNAME (${getString(R.string.alternative)})"
+            )
             entryValues = arrayOf(HANIME_MAIN_BASE_URL, HANIME_ALTER_BASE_URL)
             if (value == null) setValueIndex(0)
 
@@ -84,21 +90,11 @@ class NetworkSettingsFragment : YenalySettingsFragment(R.xml.settings_network),
                 if (newValue != origin) {
                     requireContext().showAlertDialog {
                         setCancelable(false)
-                        setTitle("注意！")
-                        setMessage(buildString {
-                            appendLine("修改域名需要重啟程式，否則不起作用！")
-                            appendLine("不同域名不共通 Cookie，所以更換域名後需要重新進行登入操作。")
-                            append("所以除 hanime1.me 以外的域名可能在某些時間段會重定向回 hanime1.me，")
-                            appendLine("這可能導致 Cookie 失效。")
-                            appendLine()
-                            appendLine("建議如下：")
-                            appendLine("· 無VPN用戶，使用 hanime1.me 並開啟內建 Hosts")
-                            appendLine("· 日本用戶，使用 hanime1.com")
-                            appendLine("· 其他地區用戶，使用 hanime1.me 並關閉內建 Hosts")
-                        })
+                        setTitle(R.string.attention)
+                        setMessage(getString(R.string.domain_change_tips).trimIndent())
                         setPositiveButton(R.string.confirm) { _, _ ->
                             logout()
-                            ActivitiesManager.restart(killProcess = true)
+                            ActivityManager.restart(killProcess = true)
                         }
                         setNegativeButton(R.string.cancel) { _, _ ->
                             domainName.value = origin
@@ -112,10 +108,10 @@ class NetworkSettingsFragment : YenalySettingsFragment(R.xml.settings_network),
             setOnPreferenceChangeListener { _, _ ->
                 requireContext().showAlertDialog {
                     setCancelable(false)
-                    setTitle("注意！")
-                    setMessage("更改需要重啟程式，否則不起作用！")
+                    setTitle(R.string.attention)
+                    setMessage(getString(R.string.restart_or_not_working, EMPTY_STRING))
                     setPositiveButton(R.string.confirm) { _, _ ->
-                        ActivitiesManager.restart(killProcess = true)
+                        ActivityManager.restart(killProcess = true)
                     }
                     setNegativeButton(R.string.cancel, null)
                 }
@@ -148,13 +144,13 @@ class NetworkSettingsFragment : YenalySettingsFragment(R.xml.settings_network),
             etIp = view.findViewById(R.id.et_ip)
             etPort = view.findViewById(R.id.et_port)
             initView()
-            dialog = MaterialAlertDialogBuilder(proxyPref.context)
-                .setView(view)
-                .setCancelable(false)
-                .setTitle(R.string.proxy)
-                .setPositiveButton(R.string.confirm, null) // Set to null. We override the onclick.
-                .setNegativeButton(R.string.cancel, null)
-                .create()
+            dialog = proxyPref.context.createAlertDialog {
+                setView(view)
+                setCancelable(false)
+                setTitle(R.string.proxy)
+                setPositiveButton(R.string.confirm, null) // Set to null. We override the onclick.
+                setNegativeButton(R.string.cancel, null)
+            }
             dialog.setOnShowListener {
                 dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
                     val ip = etIp.text?.toString().orEmpty()
@@ -179,6 +175,7 @@ class NetworkSettingsFragment : YenalySettingsFragment(R.xml.settings_network),
             }
         }
 
+        @SuppressLint("SetTextI18n")
         private fun initView() {
             when (Preferences.proxyType) {
                 HProxySelector.TYPE_DIRECT -> cgTypes.check(R.id.chip_direct)
@@ -248,7 +245,7 @@ class NetworkSettingsFragment : YenalySettingsFragment(R.xml.settings_network),
 
         fun show() {
             initView()
-            dialog.show()
+            dialog.showWithBlurEffect()
         }
     }
 

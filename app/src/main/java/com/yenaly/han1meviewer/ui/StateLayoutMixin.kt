@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.widget.TextView
 import com.drake.statelayout.StateLayout
 import com.yenaly.han1meviewer.R
+import com.yenaly.han1meviewer.pienization
 
 /**
  * 用於初始化 StateLayout。
@@ -15,6 +16,7 @@ import com.yenaly.han1meviewer.R
  * @author Yenaly Liew
  * @time 2023/11/30 030 15:24
  */
+@JvmDefaultWithoutCompatibility
 interface StateLayoutMixin {
 
     /**
@@ -26,7 +28,7 @@ interface StateLayoutMixin {
         emptyLayout = R.layout.layout_empty_view
         onError {
             val err = it as Throwable
-            findViewById<TextView>(R.id.tv_empty).text = "🥺\n${err.message}"
+            findViewById<TextView>(R.id.tv_empty).text = err.pienization
         }
         apply()
     }

@@ -1,33 +1,70 @@
-import Config.Version.createVersionCode
-import Config.Version.createVersionName
+@file:Suppress("UnstableApiUsage")
+
+import Config.Version.createVersion
+import Config.Version.source
+import Config.isRelease
+import Config.lastCommitSha
 import com.android.build.gradle.internal.api.BaseVariantOutputImpl
 
 plugins {
-    id("com.android.application")
-    kotlin("android")
-    kotlin("plugin.serialization")
-    id("com.google.devtools.ksp") version "1.9.23-1.0.19"
+    alias(libs.plugins.com.android.application)
+    alias(libs.plugins.org.jetbrains.kotlin.android)
+    alias(libs.plugins.org.jetbrains.kotlin.plugin.parcelize)
+    alias(libs.plugins.org.jetbrains.kotlin.plugin.serialization)
+    alias(libs.plugins.com.google.devtools.ksp)
+    alias(libs.plugins.com.google.gms.google.services)
+    alias(libs.plugins.com.google.firebase.crashlytics)
+    alias(libs.plugins.com.google.firebase.firebase.pref)
 }
 
 android {
-    compileSdk = Config.compileSdk
+    compileSdk = property("compile.sdk")?.toString()?.toIntOrNull()
+
+    val commitSha = if (isRelease) lastCommitSha else "b8eace8" // 方便调试
+
+    // 先 Github Secrets 再读取环境变量，若没有则读取本地文件
+    val signPwd = System.getenv("HA1_KEYSTORE_PASSWORD") ?: File(
+        projectDir, "keystore/ha1_keystore_password.txt"
+    ).checkIfExists()?.readText().orEmpty()
+
+    val githubToken = System.getenv("HA1_GITHUB_TOKEN") ?: File(
+        projectDir, "ha1_github_token.txt"
+    ).checkIfExists()?.readText().orEmpty()
+
+    val signConfig = if (isRelease) signingConfigs.create("release") {
+        storeFile = File(projectDir, "keystore/Han1meViewerKeystore.jks").checkIfExists()
+        storePassword = signPwd
+        keyAlias = "yenaly"
+        keyPassword = signPwd
+        enableV3Signing = true
+        enableV4Signing = true
+    } else null
 
     defaultConfig {
         applicationId = "com.yenaly.han1meviewer"
-        minSdk = Config.minSdk
-        targetSdk = Config.targetSdk
-        versionCode = createVersionCode()
-        versionName = versionCode.createVersionName(major = 0, minor = 13, patch = 0)
+        minSdk = property("min.sdk")?.toString()?.toIntOrNull()
+        targetSdk = property("target.sdk")?.toString()?.toIntOrNull()
+        val (code, name) = createVersion(major = 0, minor = 15, patch = 5)
+        versionCode = code
+        versionName = name
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        buildConfigField("String", "COMMIT_SHA", "\"$commitSha\"")
+        buildConfigField("String", "VERSION_NAME", "\"${versionName}\"")
+        buildConfigField("int", "VERSION_CODE", "$versionCode")
+        buildConfigField("String", "HA1_GITHUB_TOKEN", "\"${githubToken}\"")
+        buildConfigField("String", "HA1_VERSION_SOURCE", "\"${source}\"")
+
+        buildConfigField("int", "SEARCH_YEAR_RANGE_END", "${Config.thisYear}")
     }
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            signingConfig = signConfig
             proguardFiles(
-                getDefaultProguardFile("proguard-android-optimize.txt"),
-                "proguard-rules.pro"
+                getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"
             )
             applicationVariants.all variant@{
                 this@variant.outputs.all output@{
@@ -36,17 +73,30 @@ android {
                 }
             }
         }
+        debug {
+            isMinifyEnabled = false
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"
+            )
+            applicationIdSuffix = ".debug"
+        }
     }
     buildFeatures {
+        //noinspection DataBindingWithoutKapt
         dataBinding = true
+        buildConfig = true
     }
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_17
-        targetCompatibility = JavaVersion.VERSION_17
+        isCoreLibraryDesugaringEnabled = true
+        sourceCompatibility = JavaVersion.VERSION_21
+        targetCompatibility = JavaVersion.VERSION_21
     }
     kotlinOptions {
-        jvmTarget = JavaVersion.VERSION_17.toString()
-        freeCompilerArgs = listOf("-opt-in=kotlin.RequiresOptIn")
+        jvmTarget = JavaVersion.VERSION_21.toString()
+        freeCompilerArgs = listOf("-opt-in=kotlin.RequiresOptIn", "-Xjvm-default=all-compatibility")
+    }
+    lint {
+        disable += setOf("EnsureInitializerMetadata")
     }
     namespace = "com.yenaly.han1meviewer"
 }
@@ -57,68 +107,73 @@ dependencies {
 
     // android related
 
-    implementation(Libs.Core.coreKtx)
-    implementation(Libs.Core.appCompat)
-    implementation(Libs.Core.material)
-    implementation(Libs.Core.coroutinesAndroid)
-    implementation(Libs.Core.fragmentKtx)
-    implementation(Libs.Core.constraintLayout)
-    implementation(Libs.Core.recyclerView)
+    implementation(libs.bundles.android.base)
+    implementation(libs.bundles.android.jetpack)
+    implementation(libs.palette)
 
-    implementation(Libs.Jetpack.lifecycleViewModelKtx)
-    implementation(Libs.Jetpack.lifecycleRuntimeKtx)
-    implementation(Libs.Jetpack.lifecycleLiveDataKtx)
-    implementation(Libs.Jetpack.roomRuntime)
-    implementation(Libs.Jetpack.roomKtx)
-    implementation(Libs.Jetpack.navigationFragmentKtx)
-    implementation(Libs.Jetpack.navigationUiKtx)
-    implementation(Libs.Jetpack.preferenceKtx)
-    implementation(Libs.Jetpack.workRuntime)
-    implementation(Libs.Jetpack.workRuntimeKtx)
+    // datetime
+
+    implementation(libs.datetime)
 
     // parse
 
-    implementation(Libs.Parse.serialization)
-    implementation(Libs.Parse.jsoup)
+    implementation(libs.serialization.json)
+    implementation(libs.jsoup)
 
     // network
 
-    implementation(Libs.Network.retrofit)
-    implementation(Libs.Network.converterSerialization)
+    implementation(libs.retrofit)
+    implementation(libs.converter.serialization)
 
     // pic
 
-    implementation(Libs.Pic.coil)
+    implementation(libs.coil)
 
     // popup
 
-    implementation(Libs.Popup.xPopup)
-    implementation(Libs.Popup.xPopupExt)
+    implementation(libs.xpopup)
+    implementation(libs.xpopup.ext)
 
     // video
 
-    implementation(Libs.Video.jiaoziVideoPlayer)
-
-    // permission
-
-    implementation(Libs.Permission.permissionX)
+    implementation(libs.jiaozi.video.player)
+    implementation(libs.media3.exoplayer)
+    implementation(libs.media3.exoplayer.hls)
 
     // view
 
-    implementation(Libs.Core.RecyclerView.refreshLayoutKernel)
-    implementation(Libs.Core.RecyclerView.refreshHeaderMaterial)
-    implementation(Libs.Core.RecyclerView.refreshFooterClassics)
-    implementation(Libs.Core.RecyclerView.multiType)
-    implementation(Libs.Core.RecyclerView.baseRecyclerViewAdapterHelper4)
-    implementation(Libs.Core.TextView.expandableTextView)
-    implementation(Libs.Spannable.spannableX)
-    implementation(Libs.Activity.about)
-    implementation(Libs.View.stateLayout)
+    implementation(libs.refresh.layout.kernel)
+    implementation(libs.refresh.header.material)
+    implementation(libs.refresh.footer.classics)
+    implementation(libs.multitype)
+    implementation(libs.base.recyclerview.adapter.helper4)
+    implementation(libs.expandable.textview)
+    implementation(libs.spannable.x)
+    implementation(libs.about)
+    implementation(libs.statelayout)
+    implementation(libs.circular.reveal.switch)
 
-    ksp(Libs.Jetpack.roomCompiler)
+    // firebase
 
-    testImplementation(Libs.Test.junit)
+    implementation(platform(libs.firebase.bom))
+    implementation(libs.firebase.analytics)
+    implementation(libs.firebase.crashlytics)
+    implementation(libs.firebase.perf)
+    implementation(libs.firebase.config)
 
-    androidTestImplementation(Libs.Test.testJunit)
-    androidTestImplementation(Libs.Test.testEspressoCore)
+    ksp(libs.room.compiler)
+
+    coreLibraryDesugaring(libs.desugar.jdk.libs)
+
+    testImplementation(libs.junit)
+
+    androidTestImplementation(libs.test.junit)
+    androidTestImplementation(libs.test.espresso.core)
+
+    // debugImplementation(libs.leak.canary)
 }
+
+/**
+ * This function is used to check if a file exists and is a file.
+ */
+fun File.checkIfExists(): File? = if (exists() && isFile) this else null

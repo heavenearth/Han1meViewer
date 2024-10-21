@@ -1,6 +1,12 @@
 package com.yenaly.han1meviewer.ui.fragment.home.download
 
 import android.os.Bundle
+import android.view.LayoutInflater
+import android.view.ViewGroup
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.updatePadding
+import androidx.fragment.app.activityViewModels
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.flowWithLifecycle
 import androidx.lifecycle.lifecycleScope
@@ -26,18 +32,32 @@ import kotlinx.coroutines.launch
  * @author Yenaly Liew
  * @time 2022/08/01 001 17:45
  */
-class DownloadingFragment : YenalyFragment<FragmentListOnlyBinding, DownloadViewModel>(),
+class DownloadingFragment : YenalyFragment<FragmentListOnlyBinding>(),
     IToolbarFragment<MainActivity>, StateLayoutMixin {
 
+    val viewModel by activityViewModels<DownloadViewModel>()
+
     private val adapter by unsafeLazy { HanimeDownloadingRvAdapter(this) }
+
+    override fun getViewBinding(
+        inflater: LayoutInflater,
+        container: ViewGroup?
+    ): FragmentListOnlyBinding {
+        return FragmentListOnlyBinding.inflate(inflater, container, false)
+    }
 
     override fun initData(savedInstanceState: Bundle?) {
         (activity as MainActivity).setupToolbar()
 
         binding.rvList.layoutManager = LinearLayoutManager(context)
         binding.rvList.adapter = adapter
+        ViewCompat.setOnApplyWindowInsetsListener(binding.rvList) { v, insets ->
+            val navBar = insets.getInsets(WindowInsetsCompat.Type.navigationBars())
+            v.updatePadding(bottom = navBar.bottom)
+            WindowInsetsCompat.CONSUMED
+        }
         adapter.setStateViewLayout(R.layout.layout_empty_view)
-        binding.rvList.itemAnimator?.changeDuration = 0
+        // binding.rvList.itemAnimator?.changeDuration = 0
     }
 
     override fun bindDataObservers() {

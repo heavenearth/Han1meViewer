@@ -1,26 +1,15 @@
 // Top-level build file where you can add configuration options common to all sub-projects/modules.
 plugins {
-    id("com.android.application") version "8.1.1" apply false
-    id("com.android.library") version "8.1.1" apply false
-    kotlin("android") version "1.9.23" apply false
-    kotlin("plugin.serialization") version "1.9.23" apply false
-
-    id("com.github.ben-manes.versions") version "0.50.0"
+    alias(libs.plugins.com.android.application) apply false
+    alias(libs.plugins.com.android.library) apply false
+    alias(libs.plugins.org.jetbrains.kotlin.android) apply false
+    alias(libs.plugins.org.jetbrains.kotlin.plugin.serialization) apply false
+    alias(libs.plugins.org.jetbrains.kotlin.plugin.parcelize) apply false
+    alias(libs.plugins.com.google.gms.google.services) apply false
+    alias(libs.plugins.com.google.firebase.crashlytics) apply false
+    alias(libs.plugins.com.google.firebase.firebase.pref) apply false
 }
 
 task<Delete>("clean") {
-    delete(rootProject.buildDir)
-}
-
-tasks.withType<com.github.benmanes.gradle.versions.updates.DependencyUpdatesTask> {
-    rejectVersionIf {
-        isNonStable(candidate.version)
-    }
-}
-
-fun isNonStable(version: String): Boolean {
-    val stableKeyword = listOf("RELEASE", "FINAL", "GA").any { version.uppercase().contains(it) }
-    val regex = "^[0-9,.v-]+(-r)?$".toRegex()
-    val isStable = stableKeyword || regex.matches(version)
-    return isStable.not()
+    delete(rootProject.layout.buildDirectory)
 }

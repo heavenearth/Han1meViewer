@@ -4,19 +4,33 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.content.pm.ServiceInfo
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.net.toUri
-import androidx.work.*
-import com.yenaly.han1meviewer.*
+import androidx.work.BackoffPolicy
+import androidx.work.Constraints
+import androidx.work.CoroutineWorker
+import androidx.work.ForegroundInfo
+import androidx.work.NetworkType
+import androidx.work.OneTimeWorkRequest
+import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.WorkInfo
+import androidx.work.WorkManager
+import androidx.work.WorkerParameters
+import androidx.work.workDataOf
+import com.yenaly.han1meviewer.DOWNLOAD_NOTIFICATION_CHANNEL
+import com.yenaly.han1meviewer.EMPTY_STRING
 import com.yenaly.han1meviewer.R
 import com.yenaly.han1meviewer.logic.DatabaseRepo
 import com.yenaly.han1meviewer.logic.entity.HanimeDownloadEntity
 import com.yenaly.han1meviewer.logic.network.ServiceCreator
-import com.yenaly.han1meviewer.logic.network.ServiceCreator.await
+import com.yenaly.han1meviewer.util.DEF_VIDEO_TYPE
+import com.yenaly.han1meviewer.util.await
 import com.yenaly.han1meviewer.util.getDownloadedHanimeFile
-import com.yenaly.yenaly_libs.utils.unsafeLazy
+import com.yenaly.yenaly_libs.utils.showShortToast
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.Request
@@ -24,6 +38,7 @@ import okhttp3.Response
 import okhttp3.ResponseBody
 import java.io.RandomAccessFile
 import java.util.concurrent.CancellationException
+import java.util.concurrent.TimeUnit
 import kotlin.random.Random
 
 /**
@@ -34,44 +49,109 @@ import kotlin.random.Random
 class HanimeDownloadWorker(
     private val context: Context,
     workerParams: WorkerParameters,
-) : CoroutineWorker(context, workerParams) {
+) : CoroutineWorker(context, workerParams), WorkerMixin {
 
     companion object {
         const val TAG = "HanimeDownloadWorker"
 
         const val RESPONSE_INTERVAL = 500L
 
+        const val BACKOFF_DELAY = 10_000L
+
         const val DELETE = "delete"
         const val QUALITY = "quality"
         const val DOWNLOAD_URL = "download_url"
+        const val VIDEO_TYPE = "video_type"
         const val HANIME_NAME = "hanime_name"
         const val VIDEO_CODE = "video_code"
         const val COVER_URL = "cover_url"
+        const val REDOWNLOAD = "redownload"
         // const val RELEASE_DATE = "release_date"
         // const val COVER_DOWNLOAD = "cover_download"
 
         const val PROGRESS = "progress"
         const val FAILED_REASON = "failed_reason"
+
+        /**
+         * 方便统一管理下载 Worker 的创建
+         */
+        inline fun build(
+            action: OneTimeWorkRequest.Builder.() -> Unit = {}
+        ): OneTimeWorkRequest {
+            val constraints = Constraints.Builder()
+                .setRequiredNetworkType(NetworkType.CONNECTED)
+                .build()
+            return OneTimeWorkRequestBuilder<HanimeDownloadWorker>()
+                .addTag(TAG)
+                .setConstraints(constraints)
+                .setBackoffCriteria(
+                    BackoffPolicy.LINEAR,
+                    BACKOFF_DELAY, TimeUnit.MILLISECONDS
+                ).apply(action).build()
+        }
+
+        /**
+         * This function is used to collect the output of the download task
+         */
+        suspend fun collectOutput(context: Context) {
+            WorkManager.getInstance(context)
+                .getWorkInfosByTagFlow(TAG)
+                .collect { workInfos ->
+                    workInfos.forEach { workInfo ->
+                        when (workInfo.state) {
+                            WorkInfo.State.FAILED -> {
+                                val err =
+                                    workInfo.outputData.getString(FAILED_REASON)
+                                err?.let {
+                                    showShortToast(it)
+                                }
+                            }
+
+                            else -> Unit
+                        }
+                    }
+                }
+        }
     }
 
     private val notificationManager = NotificationManagerCompat.from(context)
 
     private val hanimeName by inputData(HANIME_NAME, EMPTY_STRING)
     private val downloadUrl by inputData(DOWNLOAD_URL, EMPTY_STRING)
+    private val videoType by inputData(VIDEO_TYPE, DEF_VIDEO_TYPE)
     private val quality by inputData(QUALITY, EMPTY_STRING)
     private val videoCode by inputData(VIDEO_CODE, EMPTY_STRING)
     private val coverUrl by inputData(COVER_URL, EMPTY_STRING)
 
-    private val delete by inputData(DELETE, false)
+    private val shouldDelete by inputData(DELETE, false)
+    private val shouldRedownload by inputData(REDOWNLOAD, false)
 
     private val downloadId = Random.nextInt()
     private val successId = Random.nextInt()
     private val failId = Random.nextInt()
 
     override suspend fun doWork(): Result {
-        if (delete) return Result.success()
+        if (shouldDelete) return Result.success()
         if (runAttemptCount > 2) {
-            return Result.failure(workDataOf(FAILED_REASON to "下載 $hanimeName 失敗多次！"))
+            return Result.failure(
+                workDataOf(
+                    FAILED_REASON to context.getString(
+                        R.string.download_s_failed_many_times, hanimeName
+                    )
+                )
+            )
+        } else if (runAttemptCount > 0) {
+            Handler(Looper.getMainLooper()).post {
+                // #issue-crashlytics-e2c7b3bb39a096026b99d4d90861f09a:
+                // 他就是可能为空，但是我不知道为什么会为空
+                @Suppress("USELESS_ELVIS")
+                showShortToast(
+                    context.getString(
+                        R.string.download_failed_d_times_and_retry_s,
+                        runAttemptCount, hanimeName ?: EMPTY_STRING
+                    )
+                )
+            }
         }
         setForeground(createForegroundInfo())
         return download()
@@ -79,7 +159,7 @@ class HanimeDownloadWorker(
 
     private suspend fun createNewRaf() {
         return withContext(Dispatchers.IO) {
-            val file = getDownloadedHanimeFile(hanimeName, quality)
+            val file = getDownloadedHanimeFile(hanimeName, quality, suffix = videoType)
             var raf: RandomAccessFile? = null
             var response: Response? = null
             var body: ResponseBody? = null
@@ -104,9 +184,9 @@ class HanimeDownloadWorker(
                         }
                     }
                 }
-            } catch (e: Exception) {
+            } catch (_: Exception) {
                 // 创建，但是并没有下载接收到文件大小，删除文件
-                if (file.length() == 0L) file.delete()
+                if (file.exists() && file.length() == 0L) file.delete()
             } finally {
                 raf?.close()
                 response?.close()
@@ -117,7 +197,13 @@ class HanimeDownloadWorker(
 
     private suspend fun download(): Result {
         return withContext(Dispatchers.IO) {
-            val file = getDownloadedHanimeFile(hanimeName, quality)
+            val file = getDownloadedHanimeFile(hanimeName, quality, suffix = videoType)
+            if (shouldRedownload) {
+                DatabaseRepo.HanimeDownload.deleteBy(videoCode, quality)
+                if (file.exists()) {
+                    file.delete()
+                }
+            }
             val isExist = DatabaseRepo.HanimeDownload.isExist(videoCode, quality)
             if (!isExist) createNewRaf()
             val entity = DatabaseRepo.HanimeDownload.findBy(videoCode, quality)
@@ -163,7 +249,9 @@ class HanimeDownloadWorker(
                 }
             } catch (e: Exception) {
                 if (e !is CancellationException) {
-                    showFailureNotification(e.message ?: "未知下載錯誤")
+                    showFailureNotification(
+                        e.message ?: context.getString(R.string.unknown_download_error)
+                    )
                     return@withContext Result.failure(workDataOf(FAILED_REASON to e.message))
                 }
                 // cancellation exception block 是代表用户暂停
@@ -183,8 +271,10 @@ class HanimeDownloadWorker(
         return ForegroundInfo(
             downloadId,
             NotificationCompat.Builder(context, DOWNLOAD_NOTIFICATION_CHANNEL)
-                .setSmallIcon(R.drawable.ic_launcher_background)
-                .setContentTitle("正在下載：${hanimeName}")
+                .setSmallIcon(R.mipmap.ic_launcher)
+                .setOngoing(true)
+                .setSilent(true)
+                .setContentTitle(context.getString(R.string.downloading_s, hanimeName))
                 .setPriority(NotificationCompat.PRIORITY_HIGH)
                 .setContentText("$progress%")
                 .setProgress(100, progress, false)
@@ -201,9 +291,9 @@ class HanimeDownloadWorker(
         notificationManager.notify(
             successId, NotificationCompat.Builder(context, DOWNLOAD_NOTIFICATION_CHANNEL)
                 .setSmallIcon(R.drawable.ic_baseline_check_circle_24)
-                .setContentTitle("下載任務已完成！")
+                .setContentTitle(context.getString(R.string.download_task_completed))
                 .setPriority(NotificationCompat.PRIORITY_HIGH)
-                .setContentText("下載完畢：${hanimeName}")
+                .setContentText(context.getString(R.string.download_completed_s, hanimeName))
                 .build()
         )
     }
@@ -213,9 +303,9 @@ class HanimeDownloadWorker(
         notificationManager.notify(
             failId, NotificationCompat.Builder(context, DOWNLOAD_NOTIFICATION_CHANNEL)
                 .setSmallIcon(R.drawable.ic_baseline_cancel_24)
-                .setContentTitle("該檔案已存在！")
+                .setContentTitle(context.getString(R.string.this_data_exists))
                 .setPriority(NotificationCompat.PRIORITY_HIGH)
-                .setContentText("下載失敗：${fileName} 已存在")
+                .setContentText(context.getString(R.string.download_failed_s_exists, fileName))
                 .build()
         )
     }
@@ -225,22 +315,15 @@ class HanimeDownloadWorker(
         notificationManager.notify(
             failId, NotificationCompat.Builder(context, DOWNLOAD_NOTIFICATION_CHANNEL)
                 .setSmallIcon(R.drawable.ic_baseline_cancel_24)
-                .setContentTitle("下載任務失敗！")
+                .setContentTitle(context.getString(R.string.download_task_failed))
                 .setPriority(NotificationCompat.PRIORITY_HIGH)
-                .setContentText("下載失敗：${hanimeName}\n原因為：${errMsg}")
+                .setContentText(
+                    context.getString(
+                        R.string.download_task_failed_s_reason_s,
+                        hanimeName, errMsg
+                    )
+                )
                 .build()
         )
-    }
-
-    @Suppress("UNCHECKED_CAST", "SameParameterValue")
-    private fun <T : Any> inputData(key: String, def: T): Lazy<T> = unsafeLazy {
-        when (def) {
-            is String -> (inputData.getString(key) ?: def) as T
-            is Int -> inputData.getInt(key, def) as T
-            is Long -> inputData.getLong(key, def) as T
-            is Boolean -> inputData.getBoolean(key, def) as T
-            is Float -> inputData.getFloat(key, def) as T
-            else -> throw IllegalArgumentException("Unsupported type")
-        }
     }
 }

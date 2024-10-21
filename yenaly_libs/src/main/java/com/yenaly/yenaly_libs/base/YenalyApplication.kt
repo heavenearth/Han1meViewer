@@ -5,8 +5,9 @@ package com.yenaly.yenaly_libs.base
 import android.app.Activity
 import android.app.Application
 import android.os.Bundle
-import com.yenaly.yenaly_libs.ActivitiesManager
+import com.yenaly.yenaly_libs.ActivityManager
 import com.yenaly.yenaly_libs.utils.isDebugEnabled
+import java.lang.ref.WeakReference
 
 /**
  * @ProjectName : YenalyModule
@@ -16,21 +17,23 @@ import com.yenaly.yenaly_libs.utils.isDebugEnabled
  */
 open class YenalyApplication : Application(), Application.ActivityLifecycleCallbacks {
 
+    open val isDefaultCrashHandlerEnabled: Boolean = true
+
     override fun onCreate() {
         super.onCreate()
         registerActivityLifecycleCallbacks(this)
         // do not forget to register the crash dialog activity!
-        if (!isDebugEnabled) YenalyCrashHandler.getInstance().init(this)
+        if (isDefaultCrashHandlerEnabled && !isDebugEnabled) YenalyCrashHandler.instance.init(this)
     }
 
     override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) {
-        ActivitiesManager.push(activity)
     }
 
     override fun onActivityStarted(activity: Activity) {
     }
 
     override fun onActivityResumed(activity: Activity) {
+        ActivityManager.currentActivity = WeakReference(activity)
     }
 
     override fun onActivityPaused(activity: Activity) {
@@ -43,6 +46,5 @@ open class YenalyApplication : Application(), Application.ActivityLifecycleCallb
     }
 
     override fun onActivityDestroyed(activity: Activity) {
-        ActivitiesManager.remove(activity)
     }
 }

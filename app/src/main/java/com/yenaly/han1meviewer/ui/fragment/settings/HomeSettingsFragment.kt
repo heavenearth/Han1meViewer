@@ -1,14 +1,25 @@
 package com.yenaly.han1meviewer.ui.fragment.settings
 
+import android.content.Context
+import android.content.Intent
 import android.graphics.Typeface
+import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
 import android.view.View
-import androidx.fragment.app.activityViewModels
+import androidx.annotation.RequiresApi
+import androidx.core.net.toUri
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
-import androidx.lifecycle.whenStarted
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.navigation.fragment.findNavController
 import androidx.preference.Preference
+import androidx.preference.SeekBarPreference
+import androidx.preference.SwitchPreferenceCompat
+import com.google.firebase.Firebase
+import com.google.firebase.analytics.analytics
 import com.itxca.spannablex.spannable
+import com.yenaly.han1meviewer.BuildConfig
 import com.yenaly.han1meviewer.HA1_GITHUB_FORUM_URL
 import com.yenaly.han1meviewer.HA1_GITHUB_ISSUE_URL
 import com.yenaly.han1meviewer.HA1_GITHUB_RELEASES_URL
@@ -18,15 +29,16 @@ import com.yenaly.han1meviewer.logic.state.WebsiteState
 import com.yenaly.han1meviewer.ui.activity.AboutActivity
 import com.yenaly.han1meviewer.ui.activity.SettingsActivity
 import com.yenaly.han1meviewer.ui.fragment.IToolbarFragment
-import com.yenaly.han1meviewer.ui.view.MaterialDialogPreference
-import com.yenaly.han1meviewer.ui.viewmodel.SettingsViewModel
-import com.yenaly.han1meviewer.util.checkNeedUpdate
+import com.yenaly.han1meviewer.ui.view.pref.HPrivacyPreference
+import com.yenaly.han1meviewer.ui.view.pref.MaterialDialogPreference
+import com.yenaly.han1meviewer.ui.viewmodel.AppViewModel
 import com.yenaly.han1meviewer.util.hanimeVideoLocalFolder
 import com.yenaly.han1meviewer.util.showAlertDialog
-import com.yenaly.yenaly_libs.ActivitiesManager
+import com.yenaly.han1meviewer.util.showUpdateDialog
+import com.yenaly.han1meviewer.util.showWithBlurEffect
+import com.yenaly.yenaly_libs.ActivityManager
 import com.yenaly.yenaly_libs.base.preference.LongClickablePreference
 import com.yenaly.yenaly_libs.base.settings.YenalySettingsFragment
-import com.yenaly.yenaly_libs.utils.appLocalVersionName
 import com.yenaly.yenaly_libs.utils.browse
 import com.yenaly.yenaly_libs.utils.copyToClipboard
 import com.yenaly.yenaly_libs.utils.folderSize
@@ -34,6 +46,11 @@ import com.yenaly.yenaly_libs.utils.formatFileSize
 import com.yenaly.yenaly_libs.utils.showShortToast
 import com.yenaly.yenaly_libs.utils.startActivity
 import kotlinx.coroutines.launch
+import kotlinx.datetime.Instant
+import kotlinx.datetime.LocalDateTime
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.format
+import kotlinx.datetime.toLocalDateTime
 import kotlin.concurrent.thread
 
 /**
@@ -43,8 +60,6 @@ import kotlin.concurrent.thread
  */
 class HomeSettingsFragment : YenalySettingsFragment(R.xml.settings_home),
     IToolbarFragment<SettingsActivity> {
-
-    private val viewModel by activityViewModels<SettingsViewModel>()
 
     companion object {
         const val VIDEO_LANGUAGE = "video_language"
@@ -57,6 +72,13 @@ class HomeSettingsFragment : YenalySettingsFragment(R.xml.settings_home),
         const val SUBMIT_BUG = "submit_bug"
         const val FORUM = "forum"
         const val NETWORK_SETTINGS = "network_settings"
+        const val APPLY_DEEP_LINKS = "apply_deep_links"
+
+        const val LAST_UPDATE_POPUP_TIME = "last_update_popup_time"
+        const val UPDATE_POPUP_INTERVAL_DAYS = "update_popup_interval_days"
+        const val USE_CI_UPDATE_CHANNEL = "use_ci_update_channel"
+
+        const val USE_ANALYTICS = "use_analytics"
     }
 
     private val videoLanguage
@@ -67,6 +89,10 @@ class HomeSettingsFragment : YenalySettingsFragment(R.xml.settings_home),
             by safePreference<Preference>(H_KEYFRAME_SETTINGS)
     private val update
             by safePreference<Preference>(UPDATE)
+    private val useCIUpdateChannel
+            by safePreference<SwitchPreferenceCompat>(USE_CI_UPDATE_CHANNEL)
+    private val updatePopupIntervalDays
+            by safePreference<SeekBarPreference>(UPDATE_POPUP_INTERVAL_DAYS)
     private val about
             by safePreference<Preference>(ABOUT)
     private val downloadPath
@@ -79,6 +105,10 @@ class HomeSettingsFragment : YenalySettingsFragment(R.xml.settings_home),
             by safePreference<Preference>(FORUM)
     private val networkSettings
             by safePreference<Preference>(NETWORK_SETTINGS)
+    private val applyDeepLinks
+            by safePreference<Preference>(APPLY_DEEP_LINKS)
+    private val useAnalytics
+            by safePreference<HPrivacyPreference>(USE_ANALYTICS)
 
     private var checkUpdateTimes = 0
 
@@ -91,7 +121,10 @@ class HomeSettingsFragment : YenalySettingsFragment(R.xml.settings_home),
         videoLanguage.apply {
 
             // 從 xml 轉移至此
-            entries = arrayOf("繁體中文", "簡體中文")
+            entries = arrayOf(
+                getString(R.string.traditional_chinese),
+                getString(R.string.simplified_chinese)
+            )
             entryValues = arrayOf("zh-CHT", "zh-CHS")
             // 不能直接用 defaultValue 设置，没效果
             if (value == null) setValueIndex(0)
@@ -100,10 +133,15 @@ class HomeSettingsFragment : YenalySettingsFragment(R.xml.settings_home),
                 if (newValue != Preferences.videoLanguage) {
                     requireContext().showAlertDialog {
                         setCancelable(false)
-                        setTitle("注意！")
-                        setMessage("修改影片語言需要重啟程式，否則不起作用！")
+                        setTitle(R.string.attention)
+                        setMessage(
+                            getString(
+                                R.string.restart_or_not_working,
+                                getString(R.string.video_language)
+                            )
+                        )
                         setPositiveButton(R.string.confirm) { _, _ ->
-                            ActivitiesManager.restart(killProcess = true)
+                            ActivityManager.restart(killProcess = true)
                         }
                         setNegativeButton(R.string.cancel, null)
                     }
@@ -125,7 +163,7 @@ class HomeSettingsFragment : YenalySettingsFragment(R.xml.settings_home),
                 append(" ")
                 append(getString(R.string.hanime_app_name))
             }
-            summary = getString(R.string.current_version, "v${appLocalVersionName}")
+            summary = getString(R.string.current_version, "v${BuildConfig.VERSION_NAME}")
             setOnPreferenceClickListener {
                 startActivity<AboutActivity>()
                 return@setOnPreferenceClickListener true
@@ -136,11 +174,12 @@ class HomeSettingsFragment : YenalySettingsFragment(R.xml.settings_home),
             summary = path
             setOnPreferenceClickListener {
                 requireContext().showAlertDialog {
-                    setTitle("不允許更改")
+                    setTitle(R.string.not_allow_to_change)
                     setMessage(
-                        "詳細位置：${path}\n" + "長按選項可以複製！"
+                        getString(R.string.detailed_path_s, path) + "\n"
+                                + getString(R.string.long_press_pref_to_copy)
                     )
-                    setPositiveButton("OK", null)
+                    setPositiveButton(R.string.ok, null)
                 }
                 return@setOnPreferenceClickListener true
             }
@@ -154,24 +193,23 @@ class HomeSettingsFragment : YenalySettingsFragment(R.xml.settings_home),
             val cacheDir = context.cacheDir
             var folderSize = cacheDir?.folderSize ?: 0L
             summary = generateClearCacheSummary(folderSize)
-            // todo: strings.xml
             setOnPreferenceClickListener {
                 if (folderSize != 0L) {
                     context.showAlertDialog {
-                        setTitle("請再次確認一遍")
-                        setMessage("確定要清除快取嗎？")
+                        setTitle(R.string.sure_to_clear)
+                        setMessage(R.string.sure_to_clear_cache)
                         setPositiveButton(R.string.confirm) { _, _ ->
                             thread {
                                 if (cacheDir?.deleteRecursively() == true) {
                                     folderSize = cacheDir.folderSize
                                     activity?.runOnUiThread {
-                                        showShortToast("清除成功")
+                                        showShortToast(R.string.clear_success)
                                         summary = generateClearCacheSummary(folderSize)
                                     }
                                 } else {
                                     folderSize = cacheDir.folderSize
                                     activity?.runOnUiThread {
-                                        showShortToast("清除發生意外")
+                                        showShortToast(R.string.clear_failed)
                                         summary = generateClearCacheSummary(folderSize)
                                     }
                                 }
@@ -179,7 +217,7 @@ class HomeSettingsFragment : YenalySettingsFragment(R.xml.settings_home),
                         }
                         setNegativeButton(R.string.cancel, null)
                     }
-                } else showShortToast("當前快取為空，無需清理哦")
+                } else showShortToast(R.string.cache_empty)
                 return@setOnPreferenceClickListener true
             }
         }
@@ -201,6 +239,40 @@ class HomeSettingsFragment : YenalySettingsFragment(R.xml.settings_home),
                 return@setOnPreferenceClickListener true
             }
         }
+        applyDeepLinks.apply {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                isVisible = true
+                setOnPreferenceClickListener {
+                    showApplyDeepLinksDialog(it.context)
+                    return@setOnPreferenceClickListener true
+                }
+            } else {
+                isVisible = false
+            }
+        }
+        useCIUpdateChannel.apply {
+            setOnPreferenceChangeListener { _, _ ->
+                AppViewModel.getLatestVersion()
+                return@setOnPreferenceChangeListener true
+            }
+        }
+        updatePopupIntervalDays.apply {
+            summary = Preferences.updatePopupIntervalDays.toIntervalDaysPrettyString()
+            setOnPreferenceChangeListener { _, newValue ->
+                summary = (newValue as Int).toIntervalDaysPrettyString()
+                return@setOnPreferenceChangeListener true
+            }
+        }
+        useAnalytics.apply {
+            setOnPreferenceChangeListener { _, newValue ->
+                Firebase.analytics.setAnalyticsCollectionEnabled(newValue as Boolean)
+                return@setOnPreferenceChangeListener true
+            }
+            setOnPreferenceLongClickListener {
+                privacyDialog.showWithBlurEffect()
+                return@setOnPreferenceLongClickListener true
+            }
+        }
     }
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
@@ -210,16 +282,16 @@ class HomeSettingsFragment : YenalySettingsFragment(R.xml.settings_home),
 
     private fun initFlow() {
         viewLifecycleOwner.lifecycleScope.launch {
-            whenStarted {
-                viewModel.versionFlow.collect { state ->
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                AppViewModel.versionFlow.collect { state ->
                     when (state) {
                         is WebsiteState.Error -> {
                             checkUpdateTimes++
                             update.setSummary(R.string.check_update_failed)
                             update.setOnPreferenceClickListener {
                                 if (checkUpdateTimes > 2) {
-                                    showUpdateFailedDialog()
-                                } else viewModel.getLatestVersion()
+                                    showUpdateFailedDialog(it.context)
+                                } else AppViewModel.getLatestVersion()
                                 return@setOnPreferenceClickListener true
                             }
                         }
@@ -230,16 +302,18 @@ class HomeSettingsFragment : YenalySettingsFragment(R.xml.settings_home),
                         }
 
                         is WebsiteState.Success -> {
-                            if (checkNeedUpdate(state.info.tagName)) {
-                                update.summary =
-                                    getString(R.string.check_update_success, state.info.tagName)
-                                update.setOnPreferenceClickListener {
-                                    browse(state.info.assets.first().browserDownloadURL)
-                                    return@setOnPreferenceClickListener true
-                                }
-                            } else {
+                            if (state.info == null) {
                                 update.setSummary(R.string.already_latest_update)
                                 update.onPreferenceClickListener = null
+                            } else {
+                                update.summary =
+                                    getString(R.string.check_update_success, state.info.version)
+                                update.setOnPreferenceClickListener {
+                                    viewLifecycleOwner.lifecycleScope.launch {
+                                        it.context.showUpdateDialog(state.info)
+                                    }
+                                    return@setOnPreferenceClickListener true
+                                }
                             }
                         }
                     }
@@ -248,17 +322,39 @@ class HomeSettingsFragment : YenalySettingsFragment(R.xml.settings_home),
         }
     }
 
-    private fun showUpdateFailedDialog() {
-        requireContext().showAlertDialog {
-            setTitle("別檢查了！別檢查了！")
-            setMessage(
-                """
-                更新接口走的是 Github，所以每天有下載限制，如果你發現軟體有重大問題但是提示更新失敗，請直接去 Github Releases 介面查看是否有最新版下載。
-                
-                還有我竟然發現有人花錢買這 APP，真沒必要哈！
-            """.trimIndent()
-            )
-            setPositiveButton("帶我去下載") { _, _ ->
+    // #issue-124: Support deep links.
+    @RequiresApi(Build.VERSION_CODES.S)
+    private fun showApplyDeepLinksDialog(context: Context) {
+        context.showAlertDialog {
+            setTitle(R.string.apply_deep_links)
+            setView(R.layout.dialog_apply_deep_links)
+            setPositiveButton(R.string.go_to_settings) { _, _ ->
+                // #issue-197: 有些手机不支持直接从应用里跳转到深层链接界面
+                // 这个权限是一个系统级权限，所以没办法，不支持的手机只能自己找地方开了。
+                try {
+                    val intent = Intent().apply {
+                        action = Settings.ACTION_APP_OPEN_BY_DEFAULT_SETTINGS
+                        addCategory(Intent.CATEGORY_DEFAULT)
+                        data = "package:${context.packageName}".toUri()
+                        flags = Intent.FLAG_ACTIVITY_NO_HISTORY or
+                                Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS
+                    }
+                    requireActivity().startActivity(intent)
+                } catch (e: Exception) {
+                    // 竟然还有手机不支持打开的
+                    showShortToast(R.string.action_app_open_by_default_settings_not_support)
+                    e.printStackTrace()
+                }
+            }
+            setNegativeButton(R.string.cancel, null)
+        }
+    }
+
+    private fun showUpdateFailedDialog(context: Context) {
+        context.showAlertDialog {
+            setTitle(R.string.do_not_check_update_again)
+            setMessage(getString(R.string.update_failed_tips).trimIndent())
+            setPositiveButton(R.string.take_me_to_download) { _, _ ->
                 browse(HA1_GITHUB_RELEASES_URL)
             }
             setNegativeButton(R.string.cancel, null)
@@ -273,6 +369,18 @@ class HomeSettingsFragment : YenalySettingsFragment(R.xml.settings_home),
             " ".text()
             getString(R.string.cache_occupy).text()
         }
+    }
+
+    private fun Int.toIntervalDaysPrettyString(): String {
+        return when (this) {
+            0 -> getString(R.string.at_any_time)
+            else -> getString(R.string.which_days, this)
+        } + "\n" + getString(
+            R.string.last_update_popup_check_time,
+            Instant.fromEpochSeconds(Preferences.lastUpdatePopupTime)
+                .toLocalDateTime(TimeZone.currentSystemDefault())
+                .format(LocalDateTime.Formats.ISO)
+        )
     }
 
     override fun SettingsActivity.setupToolbar() {

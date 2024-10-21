@@ -5,14 +5,16 @@ import android.util.Log
 import androidx.lifecycle.viewModelScope
 import com.yenaly.han1meviewer.EMPTY_STRING
 import com.yenaly.han1meviewer.Preferences
+import com.yenaly.han1meviewer.R
 import com.yenaly.han1meviewer.logic.DatabaseRepo
 import com.yenaly.han1meviewer.logic.NetworkRepo
 import com.yenaly.han1meviewer.logic.entity.HKeyframeEntity
 import com.yenaly.han1meviewer.logic.entity.HanimeDownloadEntity
 import com.yenaly.han1meviewer.logic.entity.WatchHistoryEntity
-import com.yenaly.han1meviewer.logic.model.HanimeVideoModel
+import com.yenaly.han1meviewer.logic.model.HanimeVideo
 import com.yenaly.han1meviewer.logic.state.VideoLoadingState
 import com.yenaly.han1meviewer.logic.state.WebsiteState
+import com.yenaly.han1meviewer.ui.viewmodel.AppViewModel.csrfToken
 import com.yenaly.yenaly_libs.base.YenalyViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -20,6 +22,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlin.math.abs
 
@@ -46,21 +49,26 @@ class VideoViewModel(application: Application) : YenalyViewModel(application) {
 
     var hKeyframes: HKeyframeEntity? = null
 
-    var csrfToken: String? = null
+    private val _hanimeVideoStateFlow =
+        MutableStateFlow<VideoLoadingState<HanimeVideo>>(VideoLoadingState.Loading)
+    val hanimeVideoStateFlow = _hanimeVideoStateFlow.asStateFlow()
 
-    private val _hanimeVideoFlow =
-        MutableStateFlow<VideoLoadingState<HanimeVideoModel>>(VideoLoadingState.Loading)
+    private val _hanimeVideoFlow = MutableStateFlow<HanimeVideo?>(null)
     val hanimeVideoFlow = _hanimeVideoFlow.asStateFlow()
 
     fun getHanimeVideo(videoCode: String) {
         viewModelScope.launch {
-            NetworkRepo.getHanimeVideo(videoCode).collect { video ->
-                _hanimeVideoFlow.value = video
+            NetworkRepo.getHanimeVideo(videoCode).collect { state ->
+                _hanimeVideoStateFlow.value = state
+                if (state is VideoLoadingState.Success) {
+                    _hanimeVideoFlow.update { state.info }
+                    csrfToken = state.info.csrfToken
+                }
             }
         }
     }
 
-    private val _addToFavVideoFlow = MutableSharedFlow<WebsiteState<Unit>>()
+    private val _addToFavVideoFlow = MutableSharedFlow<WebsiteState<Boolean>>()
     val addToFavVideoFlow = _addToFavVideoFlow.asSharedFlow()
 
     private val _loadDownloadedFlow = MutableSharedFlow<HanimeDownloadEntity?>()
@@ -82,10 +90,18 @@ class VideoViewModel(application: Application) : YenalyViewModel(application) {
         currentUserId: String?,
     ) {
         viewModelScope.launch {
-            NetworkRepo.addToMyFavVideo(videoCode, likeStatus, currentUserId, csrfToken)
-                .collect {
-                    _addToFavVideoFlow.emit(it)
+            NetworkRepo.addToMyFavVideo(
+                videoCode, likeStatus, currentUserId, csrfToken
+            ).collect { state ->
+                _addToFavVideoFlow.emit(state)
+                if (likeStatus) {
+                    // 代表移除喜爱
+                    _hanimeVideoFlow.update { it?.decFavTime() }
+                } else {
+                    // 代表添加喜爱
+                    _hanimeVideoFlow.update { it?.incFavTime() }
                 }
+            }
         }
     }
 
@@ -101,6 +117,11 @@ class VideoViewModel(application: Application) : YenalyViewModel(application) {
         viewModelScope.launch {
             NetworkRepo.addToMyList(listCode, videoCode, isChecked, position, csrfToken).collect {
                 _modifyMyListFlow.emit(it)
+                _hanimeVideoFlow.update { prev ->
+                    val myList = prev?.myList?.myListInfo.orEmpty().toMutableList()
+                    myList[position] = myList[position].copy(isSelected = isChecked)
+                    prev?.copy(myList = prev.myList?.copy(myListInfo = myList))
+                }
             }
         }
     }
@@ -119,6 +140,41 @@ class VideoViewModel(application: Application) : YenalyViewModel(application) {
         }
     }
 
+    // true代表已关注成功，false代表取消关注成功
+    private val _subscribeArtistFlow = MutableSharedFlow<WebsiteState<Boolean>>()
+    val subscribeArtistFlow = _subscribeArtistFlow.asSharedFlow()
+
+    fun subscribeArtist(
+        userId: String,
+        artistId: String,
+    ) {
+        viewModelScope.launch {
+            NetworkRepo.subscribeArtist(csrfToken, userId, artistId, true).collect { state ->
+                _subscribeArtistFlow.emit(state)
+                if (state is WebsiteState.Success) {
+                    _hanimeVideoFlow.update {
+                        it?.copy(artist = it.artist?.copy(post = it.artist.post?.copy(isSubscribed = true)))
+                    }
+                }
+            }
+        }
+    }
+
+    fun unsubscribeArtist(
+        userId: String,
+        artistId: String,
+    ) {
+        viewModelScope.launch {
+            NetworkRepo.subscribeArtist(csrfToken, userId, artistId, false).collect { state ->
+                _subscribeArtistFlow.emit(state)
+                if (state is WebsiteState.Success) {
+                    _hanimeVideoFlow.update {
+                        it?.copy(artist = it.artist?.copy(post = it.artist.post?.copy(isSubscribed = false)))
+                    }
+                }
+            }
+        }
+    }
 
     // boolean: 成功 or 失敗，String: 提示信息
     private val _modifyHKeyframeFlow = MutableSharedFlow<Pair<Boolean, String>>()
@@ -133,13 +189,18 @@ class VideoViewModel(application: Application) : YenalyViewModel(application) {
                 this@VideoViewModel.hKeyframes?.keyframes?.forEach { keyframeInDb ->
                     if (abs(keyframeInDb.position - hKeyframe.position) < MIN_H_KEYFRAME_SAVE_INTERVAL) {
                         Log.d("append_hkeyframe", "time conflict: $keyframeInDb")
-                        _modifyHKeyframeFlow.emit(false to "間隔太短，必須大於${MIN_H_KEYFRAME_SAVE_INTERVAL / 1_000L}s")
+                        _modifyHKeyframeFlow.emit(
+                            false to application.getString(
+                                R.string.interval_must_greater_than_d,
+                                MIN_H_KEYFRAME_SAVE_INTERVAL / 1_000L
+                            )
+                        )
                         return@run
                     }
                 }
                 DatabaseRepo.HKeyframe.appendKeyframe(videoCode, title, hKeyframe)
                 Log.d("append_hkeyframe", "$hKeyframe DONE!")
-                _modifyHKeyframeFlow.emit(true to "添加成功")
+                _modifyHKeyframeFlow.emit(true to application.getString(R.string.add_success))
             }
         }
     }
@@ -148,7 +209,7 @@ class VideoViewModel(application: Application) : YenalyViewModel(application) {
         viewModelScope.launch(Dispatchers.IO) {
             DatabaseRepo.HKeyframe.removeKeyframe(videoCode, hKeyframe)
             Log.d("remove_hkeyframe", "$hKeyframe DONE!")
-            _modifyHKeyframeFlow.emit(true to "刪除成功")
+            _modifyHKeyframeFlow.emit(true to application.getString(R.string.delete_success))
         }
     }
 
@@ -159,7 +220,7 @@ class VideoViewModel(application: Application) : YenalyViewModel(application) {
         viewModelScope.launch {
             DatabaseRepo.HKeyframe.modifyKeyframe(videoCode, oldKeyframe, keyframe)
             Log.d("modify_hkeyframe", "$keyframe DONE!")
-            _modifyHKeyframeFlow.emit(true to "修改成功")
+            _modifyHKeyframeFlow.emit(true to application.getString(R.string.modify_success))
         }
     }
 }

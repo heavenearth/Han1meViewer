@@ -7,13 +7,18 @@ import com.yenaly.han1meviewer.ui.fragment.settings.HKeyframeSettingsFragment
 import com.yenaly.han1meviewer.ui.fragment.settings.HomeSettingsFragment
 import com.yenaly.han1meviewer.ui.fragment.settings.NetworkSettingsFragment
 import com.yenaly.han1meviewer.ui.fragment.settings.PlayerSettingsFragment
-import com.yenaly.han1meviewer.ui.view.HJzvdStd
+import com.yenaly.han1meviewer.ui.view.video.HJzvdStd
+import com.yenaly.han1meviewer.ui.view.video.HMediaKernel
 import com.yenaly.han1meviewer.util.CookieString
 import com.yenaly.yenaly_libs.utils.applicationContext
 import com.yenaly.yenaly_libs.utils.getSpValue
 import com.yenaly.yenaly_libs.utils.putSpValue
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.datetime.Clock
+import kotlinx.datetime.Instant
+import kotlin.time.Duration.Companion.days
 
-internal object Preferences {
+object Preferences {
     /**
      * [Preference][androidx.preference.PreferenceFragmentCompat]自帶的SP
      */
@@ -27,18 +32,61 @@ internal object Preferences {
     /**
      * 是否登入，一般跟[loginCookie]一起賦值
      */
-    var isAlreadyLogin
+    var isAlreadyLogin: Boolean
         get() = getSpValue(ALREADY_LOGIN, false)
-        set(value) = putSpValue(ALREADY_LOGIN, value)
+        set(value) {
+            loginStateFlow.value = value
+            putSpValue(ALREADY_LOGIN, value)
+        }
+
+    val loginStateFlow = MutableStateFlow(isAlreadyLogin)
 
     /**
      * 保存的string格式的登入cookie
      */
     var loginCookie
         get() = CookieString(getSpValue(LOGIN_COOKIE, EMPTY_STRING))
-        set(value) = putSpValue(LOGIN_COOKIE, value.cookie)
+        set(value) {
+            loginCookieStateFlow.value = value
+            putSpValue(LOGIN_COOKIE, value.cookie)
+        }
+
+    val loginCookieStateFlow = MutableStateFlow(loginCookie)
+
+    // 更新 相關
+
+    private const val UPDATE_NODE_ID = "update_node_id"
+
+    var updateNodeId: String
+        get() = getSpValue(UPDATE_NODE_ID, EMPTY_STRING)
+        set(value) = putSpValue(UPDATE_NODE_ID, value)
+
+    var lastUpdatePopupTime
+        get() = getSpValue(HomeSettingsFragment.LAST_UPDATE_POPUP_TIME, 0L)
+        set(value) = putSpValue(HomeSettingsFragment.LAST_UPDATE_POPUP_TIME, value)
+
+    val updatePopupIntervalDays
+        get() = preferenceSp.getInt(HomeSettingsFragment.UPDATE_POPUP_INTERVAL_DAYS, 0)
+
+    val useCIUpdateChannel
+        get() = preferenceSp.getBoolean(HomeSettingsFragment.USE_CI_UPDATE_CHANNEL, false)
+
+    // Check if show update dialog.
+    val isUpdateDialogVisible: Boolean
+        get() {
+            val now = Clock.System.now()
+            val lastCheckTime = Instant.fromEpochSeconds(lastUpdatePopupTime)
+            val interval = updatePopupIntervalDays
+            return now > lastCheckTime + interval.days
+        }
 
     // 設定 相關
+
+    val switchPlayerKernel: String
+        get() = preferenceSp.getString(
+            PlayerSettingsFragment.SWITCH_PLAYER_KERNEL,
+            HMediaKernel.Type.ExoPlayer.name
+        ) ?: HMediaKernel.Type.ExoPlayer.name
 
     val showBottomProgress: Boolean
         get() = preferenceSp.getBoolean(
@@ -97,7 +145,7 @@ internal object Preferences {
     val sharedHKeyframesEnable: Boolean
         get() = preferenceSp.getBoolean(
             HKeyframeSettingsFragment.SHARED_H_KEYFRAMES_ENABLE,
-            false
+            true
         )
 
     val sharedHKeyframesUseFirst: Boolean
@@ -119,4 +167,10 @@ internal object Preferences {
 
     val proxyPort: Int
         get() = preferenceSp.getInt(NetworkSettingsFragment.PROXY_PORT, -1)
+
+    // 隐私 相關
+
+    val isAnalyticsEnabled: Boolean
+        get() = preferenceSp.getBoolean(HomeSettingsFragment.USE_ANALYTICS, true)
+
 }

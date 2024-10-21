@@ -10,7 +10,7 @@ import androidx.preference.SwitchPreferenceCompat
 import com.yenaly.han1meviewer.R
 import com.yenaly.han1meviewer.ui.activity.SettingsActivity
 import com.yenaly.han1meviewer.ui.fragment.IToolbarFragment
-import com.yenaly.han1meviewer.ui.view.HJzvdStd
+import com.yenaly.han1meviewer.ui.view.video.HJzvdStd
 import com.yenaly.yenaly_libs.base.settings.YenalySettingsFragment
 
 /**
@@ -104,7 +104,7 @@ class HKeyframeSettingsFragment : YenalySettingsFragment(R.xml.settings_h_keyfra
         whenCountdownRemind.apply {
             setDefaultValue(HJzvdStd.DEF_COUNTDOWN_SEC)
             summary = value.toPrettyCountdownRemindString()
-            setOnPreferenceChangeListener { pref, newValue ->
+            setOnPreferenceChangeListener { _, newValue ->
                 summary = (newValue as Int).toPrettyCountdownRemindString()
                 return@setOnPreferenceChangeListener true
             }
@@ -115,7 +115,7 @@ class HKeyframeSettingsFragment : YenalySettingsFragment(R.xml.settings_h_keyfra
         return buildString {
             val countdown = this@toPrettyCountdownRemindString
             append(getString(R.string.will_remind_before_d_seconds, countdown))
-            if (countdown == HJzvdStd.DEF_COUNTDOWN_SEC) append("（預設）")
+            if (countdown == HJzvdStd.DEF_COUNTDOWN_SEC) append(" (${getString(R.string.default_)})")
         }
     }
 

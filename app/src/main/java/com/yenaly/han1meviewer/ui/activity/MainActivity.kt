@@ -2,14 +2,27 @@ package com.yenaly.han1meviewer.ui.activity
 
 import android.annotation.SuppressLint
 import android.content.Intent
-import android.graphics.Typeface
+import android.graphics.Color
+import android.graphics.RenderEffect
+import android.graphics.Shader
+import android.os.Build
 import android.os.Bundle
+import android.view.LayoutInflater
+import android.view.View
 import android.widget.ImageView
 import android.widget.TextView
+import androidx.activity.SystemBarStyle
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.viewModels
 import androidx.appcompat.widget.Toolbar
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.drawerlayout.widget.DrawerLayout.DrawerListener
+import androidx.fragment.app.Fragment
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
-import androidx.lifecycle.whenStarted
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.navigation.NavController
 import androidx.navigation.fragment.NavHostFragment
 import androidx.navigation.ui.AppBarConfiguration
@@ -17,29 +30,38 @@ import androidx.navigation.ui.setupWithNavController
 import coil.load
 import coil.transform.CircleCropTransformation
 import com.google.android.material.snackbar.Snackbar
-import com.itxca.spannablex.spannable
+import com.yenaly.han1meviewer.Preferences
 import com.yenaly.han1meviewer.Preferences.isAlreadyLogin
 import com.yenaly.han1meviewer.R
 import com.yenaly.han1meviewer.VIDEO_CODE
 import com.yenaly.han1meviewer.databinding.ActivityMainBinding
 import com.yenaly.han1meviewer.hanimeSpannable
-import com.yenaly.han1meviewer.logic.model.VersionModel
+import com.yenaly.han1meviewer.logic.exception.CloudFlareBlockedException
 import com.yenaly.han1meviewer.logic.state.WebsiteState
 import com.yenaly.han1meviewer.logout
+import com.yenaly.han1meviewer.ui.viewmodel.AppViewModel
 import com.yenaly.han1meviewer.ui.viewmodel.MainViewModel
-import com.yenaly.han1meviewer.util.checkNeedUpdate
+import com.yenaly.han1meviewer.util.logScreenViewEvent
 import com.yenaly.han1meviewer.util.showAlertDialog
+import com.yenaly.han1meviewer.util.showUpdateDialog
 import com.yenaly.han1meviewer.videoUrlRegex
 import com.yenaly.yenaly_libs.base.YenalyActivity
-import com.yenaly.yenaly_libs.utils.*
+import com.yenaly.yenaly_libs.utils.dp
+import com.yenaly.yenaly_libs.utils.showShortToast
+import com.yenaly.yenaly_libs.utils.showSnackBar
+import com.yenaly.yenaly_libs.utils.startActivity
+import com.yenaly.yenaly_libs.utils.textFromClipboard
 import kotlinx.coroutines.launch
+import kotlinx.datetime.Clock
 
 /**
  * @project Hanime1
  * @author Yenaly Liew
  * @time 2022/06/08 008 17:35
  */
-class MainActivity : YenalyActivity<ActivityMainBinding, MainViewModel>() {
+class MainActivity : YenalyActivity<ActivityMainBinding>(), DrawerListener {
+
+    val viewModel by viewModels<MainViewModel>()
 
     lateinit var navHostFragment: NavHostFragment
     lateinit var navController: NavController
@@ -56,8 +78,18 @@ class MainActivity : YenalyActivity<ActivityMainBinding, MainViewModel>() {
             }
         }
 
-    override fun setUiStyle() {
+    override fun getViewBinding(layoutInflater: LayoutInflater): ActivityMainBinding =
+        ActivityMainBinding.inflate(layoutInflater)
 
+    override fun setUiStyle() {
+        enableEdgeToEdge(
+            statusBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
+            navigationBarStyle = SystemBarStyle.dark(Color.TRANSPARENT)
+        )
+    }
+
+    override val onFragmentResumedListener: (Fragment) -> Unit = { fragment ->
+        logScreenViewEvent(fragment)
     }
 
     /**
@@ -66,19 +98,19 @@ class MainActivity : YenalyActivity<ActivityMainBinding, MainViewModel>() {
     override fun initData(savedInstanceState: Bundle?) {
 
         initHeaderView()
+        initNavActivity()
         initMenu()
 
         navHostFragment =
             supportFragmentManager.findFragmentById(R.id.fcv_main) as NavHostFragment
         navController = navHostFragment.navController
         binding.nvMain.setupWithNavController(navController)
+        binding.dlMain.addDrawerListener(this)
 
-        binding.nvMain.getHeaderView(0)?.setPaddingRelative(0, window.currentStatusBarHeight, 0, 0)
-
-        binding.nvMain.menu.findItem(R.id.nv_settings).setOnMenuItemClickListener {
-            startActivity<SettingsActivity>()
-            binding.dlMain.closeDrawers()
-            return@setOnMenuItemClickListener false
+        ViewCompat.setOnApplyWindowInsetsListener(binding.nvMain) { v, insets ->
+            val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            v.setPadding(systemBars.left, systemBars.top, systemBars.right, systemBars.bottom)
+            WindowInsetsCompat.CONSUMED
         }
     }
 
@@ -95,11 +127,59 @@ class MainActivity : YenalyActivity<ActivityMainBinding, MainViewModel>() {
 
     override fun bindDataObservers() {
         lifecycleScope.launch {
-            whenStarted {
-                viewModel.versionFlow.collect {
-                    if (it is WebsiteState.Success) {
-                        if (checkNeedUpdate(it.info.tagName)) {
-                            showUpdateDialog(it.info)
+            repeatOnLifecycle(Lifecycle.State.CREATED) {
+                AppViewModel.versionFlow.collect { state ->
+                    if (state is WebsiteState.Success && Preferences.isUpdateDialogVisible) {
+                        state.info?.let { release ->
+                            Preferences.lastUpdatePopupTime = Clock.System.now().epochSeconds
+                            showUpdateDialog(release)
+                        }
+                    }
+                }
+            }
+        }
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.CREATED) {
+                viewModel.homePageFlow.collect { state ->
+                    if (state is WebsiteState.Error) {
+                        if (state.throwable is CloudFlareBlockedException) {
+                            // TODO: 被屏蔽时的处理
+                        }
+                    }
+                }
+            }
+        }
+
+        binding.nvMain.getHeaderView(0)?.let { header ->
+            val headerAvatar = header.findViewById<ImageView>(R.id.header_avatar)
+            val headerUsername = header.findViewById<TextView>(R.id.header_username)
+            lifecycleScope.launch {
+                repeatOnLifecycle(Lifecycle.State.CREATED) {
+                    viewModel.homePageFlow.collect { state ->
+                        if (state is WebsiteState.Success) {
+                            if (isAlreadyLogin) {
+                                if (state.info.username == null) {
+                                    headerAvatar.load(R.mipmap.ic_launcher) {
+                                        crossfade(true)
+                                        transformations(CircleCropTransformation())
+                                    }
+                                    headerUsername.setText(R.string.refresh_page_or_login_expired)
+                                } else {
+                                    headerAvatar.load(state.info.avatarUrl) {
+                                        crossfade(true)
+                                        transformations(CircleCropTransformation())
+                                    }
+                                    headerUsername.text = state.info.username
+                                }
+                            } else {
+                                initHeaderView()
+                            }
+                        } else {
+                            headerAvatar.load(R.mipmap.ic_launcher) {
+                                crossfade(true)
+                                transformations(CircleCropTransformation())
+                            }
+                            headerUsername.setText(R.string.loading)
                         }
                     }
                 }
@@ -111,50 +191,39 @@ class MainActivity : YenalyActivity<ActivityMainBinding, MainViewModel>() {
         return navController.navigateUp() || super.onSupportNavigateUp()
     }
 
-    // todo: 有時間轉移到 strings.xml
-    @Deprecated("To SnackBar")
-    private fun showFindRelatedLinkDialog(videoCode: String) {
-        showAlertDialog {
-            setTitle("新發現！")
-            setMessage("檢測到剪貼簿裏存在Hanime1相關連結")
-            setPositiveButton("進入！") { _, _ ->
-                startActivity<VideoActivity>(VIDEO_CODE to videoCode)
+    override fun onDrawerSlide(drawerView: View, slideOffset: Float) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            if (slideOffset > 0f) {
+                binding.fcvMain.setRenderEffect(
+                    RenderEffect.createBlurEffect(
+                        6.dp * slideOffset,
+                        6.dp * slideOffset,
+                        Shader.TileMode.CLAMP
+                    )
+                )
             }
-            setNegativeButton("算了吧", null)
         }
     }
 
-    // todo: 有時間轉移到 strings.xml
+    override fun onDrawerClosed(drawerView: View) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            binding.fcvMain.setRenderEffect(null)
+        }
+    }
+
+    override fun onDrawerOpened(drawerView: View) {
+
+    }
+
+    override fun onDrawerStateChanged(newState: Int) {
+
+    }
+
     private fun showFindRelatedLinkSnackBar(videoCode: String) {
-        showSnackBar("檢測到剪貼簿裏存在Hanime1相關連結", Snackbar.LENGTH_LONG) {
-            setAction("進入！") {
+        showSnackBar(R.string.detect_ha1_related_link_in_clipboard, Snackbar.LENGTH_LONG) {
+            setAction(R.string.enter) {
                 startActivity<VideoActivity>(VIDEO_CODE to videoCode)
             }
-        }
-    }
-
-    // todo: 有時間轉移到 strings.xml
-    private fun showUpdateDialog(versionInfo: VersionModel) {
-        val msg = spannable {
-            "檢測到新版本：".text()
-            newline()
-            versionInfo.tagName.span {
-                style(Typeface.BOLD)
-            }
-            newline()
-            "更新内容：".text()
-            newline()
-            versionInfo.body.span {
-                style(Typeface.BOLD)
-            }
-        }
-        showAlertDialog {
-            setTitle("檢測到新版本！")
-            setMessage(msg)
-            setPositiveButton("去下載！") { _, _ ->
-                browse(versionInfo.assets.first().browserDownloadURL)
-            }
-            setNeutralButton("忽略", null)
         }
     }
 
@@ -166,32 +235,11 @@ class MainActivity : YenalyActivity<ActivityMainBinding, MainViewModel>() {
             if (isAlreadyLogin) {
                 headerAvatar.setOnClickListener {
                     showAlertDialog {
-                        setTitle("你確定要登出嗎？")
-                        setPositiveButton("是的") { _, _ ->
-                            logout()
-                            initHeaderView()
-                            initMenu()
+                        setTitle(R.string.sure_to_logout)
+                        setPositiveButton(R.string.sure) { _, _ ->
+                            logoutWithRefresh()
                         }
-                        setNegativeButton("算了吧", null)
-                    }
-                }
-                lifecycleScope.launch {
-                    whenStarted {
-                        viewModel.homePageFlow.collect { state ->
-                            if (state is WebsiteState.Success) {
-                                headerAvatar.load(state.info.avatarUrl) {
-                                    crossfade(true)
-                                    transformations(CircleCropTransformation())
-                                }
-                                headerUsername.text = state.info.username
-                            } else {
-                                headerAvatar.load(R.mipmap.ic_launcher) {
-                                    crossfade(true)
-                                    transformations(CircleCropTransformation())
-                                }
-                                headerUsername.text = "Loading..."
-                            }
-                        }
+                        setNegativeButton(R.string.no, null)
                     }
                 }
             } else {
@@ -199,10 +247,24 @@ class MainActivity : YenalyActivity<ActivityMainBinding, MainViewModel>() {
                     crossfade(true)
                     transformations(CircleCropTransformation())
                 }
-                headerUsername.text = "未登錄"
+                headerUsername.setText(R.string.not_logged_in)
                 headerAvatar.setOnClickListener {
                     gotoLoginActivity()
                 }
+            }
+        }
+    }
+
+    // #issue-225: 侧滑选单双重点击异常，不能从 xml 里直接定义 activity 块，需要在代码里初始化
+    private fun initNavActivity() {
+        binding.nvMain.menu.apply {
+            findItem(R.id.nv_settings).setOnMenuItemClickListener {
+                startActivity<SettingsActivity>()
+                return@setOnMenuItemClickListener false
+            }
+            findItem(R.id.nv_h_keyframe_settings).setOnMenuItemClickListener {
+                startActivity<SettingsActivity>(SettingsActivity.H_KEYFRAME_SETTINGS to true)
+                return@setOnMenuItemClickListener false
             }
         }
     }
@@ -219,7 +281,6 @@ class MainActivity : YenalyActivity<ActivityMainBinding, MainViewModel>() {
             loginNeededFragmentList.forEach {
                 binding.nvMain.menu.findItem(it).setOnMenuItemClickListener {
                     showShortToast(R.string.login_first)
-                    gotoLoginActivity()
                     return@setOnMenuItemClickListener false
                 }
             }
@@ -229,6 +290,12 @@ class MainActivity : YenalyActivity<ActivityMainBinding, MainViewModel>() {
     private fun gotoLoginActivity() {
         val intent = Intent(this, LoginActivity::class.java)
         loginDataLauncher.launch(intent)
+    }
+
+    private fun logoutWithRefresh() {
+        logout()
+        initHeaderView()
+        initMenu()
     }
 
     /**
